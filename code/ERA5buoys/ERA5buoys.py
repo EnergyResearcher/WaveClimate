@@ -173,6 +173,8 @@ print(dist.summary)
 # %%
 dist.plot()
 # %%
+dist.summary[dist.summary.index==0]
+# %%
 dist = distfit(distr='gamma')
 dist.fit_transform(swh_buoy.dropna())
 # %%
@@ -237,4 +239,32 @@ def stats_table(ref_dict, obs_dict):
         data_stats.loc[row, 'si'] = stats['si']
         data_stats.loc[row, 'cc'] = stats['cc']
         data_stats.loc[row, 'lsf'] = stats['lsf']
+# %%
+dstrs = pd.DataFrame()
+for location in locations:
+    dist.fit_transform(csv_buoys[location].swh.dropna())
+    dstrs = pd.concat([dstrs, dist.summary[dist.summary.index==0]])
+# %%
+dstrs
+# %%
+dist.plot()
+# %%
+dstrs_lognorm = pd.DataFrame()
+dist = distfit(distr='lognorm')
+for location in locations:
+    dist.fit_transform(csv_buoys[location].swh.dropna())
+    dstrs_lognorm = pd.concat([dstrs_lognorm, dist.summary[dist.summary.index==0]])
+    
+# %%
+dstrs_lognorm.index = (range(len(dstrs_lognorm)))
+dstrs_lognorm
+# %%
+dstrs_era = pd.DataFrame()
+dist = distfit(distr='lognorm')
+for location in locations:
+    dist.fit_transform(era_dict[location].swh.dropna())
+    dstrs_era = pd.concat([dstrs_era, dist.summary[dist.summary.index==0]])
+# %%
+dstrs_era.index = range(len(dstrs_era))
+dstrs_era
 # %%
