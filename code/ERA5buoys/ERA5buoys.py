@@ -163,7 +163,8 @@ csv_buoys = filter_buoys(buoy_data, 0.25, degrees=(0.5,0.5))
 # %%
 era_dict = create_era_series(era, csv_buoys)
 # %%
-
+for keys, values in csv_buoys.items():
+    print(keys)
 # %%
 from distfit import distfit
 dist = distfit()
@@ -193,11 +194,47 @@ def calc_stats(obs,frcst):
         ((obs*frcst).sum() - (obs.sum()*frcst.sum())/
         num_pairs)
     )
-    return bias, rmse, re, si, cc, lsf
+    return {'bias':bias, 'rmse':rmse, 're':re, 'si':si, 'cc':cc, 'lsf':lsf}
 # %%
-for location, data 
+data_stats = pd.DataFrame(
+    columns=['lat','lon', 'duration', 'bias', 'rmse', 're', 'si', 'cc', 'lsf'],
+    index=range(len(csv_buoys)))
+locations = list(csv_buoys.keys())
+for location in locations:
+    row = locations.index(location)
+    stats = calc_stats(csv_buoys[location].swh, era_dict[location].swh)
+    data_stats.loc[row, 'lat'] = location[0]
+    data_stats.loc[row, 'lon'] = location[1]
+    data_stats.loc[row, 'duration'] = round_to(len(pd.date_range(
+        start=min(csv_buoys[location].index), end=max(
+            csv_buoys[location].index), freq='D'))/365, 0.1)
+    
+    data_stats.loc[row, 'bias'] = stats['bias']
+    data_stats.loc[row, 'rmse'] = stats['rmse']
+    data_stats.loc[row, 're'] = stats['re']
+    data_stats.loc[row, 'si'] = stats['si']
+    data_stats.loc[row, 'cc'] = stats['cc']
+    data_stats.loc[row, 'lsf'] = stats['lsf']
 # %%
-
-# %%
-swh_buoy[swh_buoy.index < pd.to_datetime('20210101')]
+def stats_table(ref_dict, obs_dict):
+    #works for swh only, if other variables needed, make changes
+    data_stats = pd.DataFrame(
+        columns=['lat','lon', 'duration', 'bias', 'rmse', 're', 'si', 'cc', 'lsf'],
+        index=range(len(obs_dict)))
+    locations = list(obs_dict.keys())
+    for location in locations:
+        row = locations.index(location)
+        stats = calc_stats(obs_dict[location].swh, ref_dict[location].swh)
+        data_stats.loc[row, 'lat'] = location[0]
+        data_stats.loc[row, 'lon'] = location[1]
+        data_stats.loc[row, 'duration'] = round_to(len(pd.date_range(
+            start=min(obs_dict[location].index), end=max(
+                obs_dict[location].index), freq='D'))/365, 0.1)
+    
+        data_stats.loc[row, 'bias'] = stats['bias']
+        data_stats.loc[row, 'rmse'] = stats['rmse']
+        data_stats.loc[row, 're'] = stats['re']
+        data_stats.loc[row, 'si'] = stats['si']
+        data_stats.loc[row, 'cc'] = stats['cc']
+        data_stats.loc[row, 'lsf'] = stats['lsf']
 # %%
