@@ -83,8 +83,8 @@ def arrange_files(file_list, column_names):
                 csv.index = csv.index - pd.Timedelta(csv.index[0].minute, 'T')
         else:
             csv = csv.resample('H').mean()
-        csv_dfs[(info['lat'], info['lon'])] = csv
-        print(f'{file_list.index(file)} out of {len(file_list)} files left')
+        csv_dfs[(info['lat'], info['lon'])] = csv[csv.index < pd.to_datetime('20210101')]
+        print(f'{len(file_list)-file_list.index(file)} out of {len(file_list)} files left')
     return csv_dfs
 # %%
 csv_list = glob.glob(md+'\\buoys' + '\*.csv')
@@ -156,15 +156,12 @@ def create_era_series(nc_reference, csv_buoys):
         #convert to pandas and save into dict
         csv_reference = new_nc.to_dataframe()
         reference_files[location] = csv_reference
+        print(f'{len(csv_buoys)-list(csv_buoys.keys()).index(location)} out of {len(csv_buoys)} files left')
     return reference_files
 # %%
 csv_buoys = filter_buoys(buoy_data, 0.25, degrees=(0.5,0.5))
 # %%
 era_dict = create_era_series(era, csv_buoys)
-# %%
-swh_era = era_dict[(51.5705,1.5787)].swh
-swh_buoy = csv_buoys[(51.5705,1.5787)].swh
-# %%
 # %%
 
 # %%
@@ -198,9 +195,9 @@ def calc_stats(obs,frcst):
     )
     return bias, rmse, re, si, cc, lsf
 # %%
+for location, data 
+# %%
 
 # %%
-swh_era.hist()
-# %%
-swh_buoy.hist()
+swh_buoy[swh_buoy.index < pd.to_datetime('20210101')]
 # %%
