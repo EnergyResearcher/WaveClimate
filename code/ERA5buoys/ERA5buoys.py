@@ -11,6 +11,9 @@ import glob
 from basicfunc import round_to, proximity_calc, DM_to_DecDeg
 #import info
 import analysis
+from distfit import distfit
+import scipy
+import scipy.stats
 #from analysis import get_info_from_filename
 #from analysis import arrange_files
 
@@ -163,20 +166,11 @@ csv_buoys = filter_buoys(buoy_data, 0.25, degrees=(0.5,0.5))
 # %%
 era_dict = create_era_series(era, csv_buoys)
 # %%
-for keys, values in csv_buoys.items():
-    print(keys)
+
 # %%
-from distfit import distfit
-dist = distfit()
-dist.fit_transform(swh_buoy.dropna())
-print(dist.summary)
+dist = distfit(distr='full')
 # %%
-dist.plot()
-# %%
-dist.summary[dist.summary.index==0]
-# %%
-dist = distfit(distr='gamma')
-dist.fit_transform(swh_buoy.dropna())
+
 # %%
 def calc_stats(obs,frcst):
     bias = (frcst - obs).mean()
@@ -241,13 +235,12 @@ def stats_table(ref_dict, obs_dict):
         data_stats.loc[row, 'lsf'] = stats['lsf']
 # %%
 dstrs = pd.DataFrame()
+locations = list(csv_buoys.keys())
 for location in locations:
     dist.fit_transform(csv_buoys[location].swh.dropna())
     dstrs = pd.concat([dstrs, dist.summary[dist.summary.index==0]])
 # %%
-dstrs
-# %%
-dist.plot()
+
 # %%
 dstrs_lognorm = pd.DataFrame()
 dist = distfit(distr='lognorm')
@@ -267,4 +260,93 @@ for location in locations:
 # %%
 dstrs_era.index = range(len(dstrs_era))
 dstrs_era
+# %%
+csv_buoys[(51.879200000000004,1.488)].columns = ['m0wp', 'swh', 'nan']
+csv_buoys[(51.879200000000004,1.488)] = csv_buoys[(51.879200000000004,1.488)].drop(columns = ['nan'])
+# %%
+dist.summary
+# %%
+
+# %%
+params = scipy.stats.distributions.weibull_min.fit(data.values, floc=0)
+params
+#shape = params[1]
+#scale = params[3]
+#x = np.linspace(0,30, 2630)
+#fitted_data = scipy.stats.distributions.exponweib.pdf(data.values, shape, scale)
+# %%
+data = csv_buoys[(51.879200000000004,1.488)].swh.dropna()
+# %%
+data.values
+# %%
+values, bins, hist = plt.hist(data.values,bins=10, lw=4, range=(0,5))
+centre = (bins[:-1] + bins[1:])/2
+#plt.hist(data.values, density=True)
+plt.plot(centre,scipy.stats.exponweib.pdf(centre, *params)*len(data.values), 'r-')
+# %%
+dist_names = ['weibull_min', 'rayleigh', 'lognorm']
+locations = list(csv_buoys.keys())
+
+# %%
+#this is the working code
+for location in locations:
+    fig = plt.figure()
+    waves = csv_buoys[location].swh.dropna().values
+    for dist_name in dist_names:
+        dist = getattr(scipy.stats, dist_name)
+        params = dist.fit(waves)
+        arg = params[:-2]
+        loc = params[-2]
+        scale = params[-1]
+        if arg:
+            pdf_fitted = dist.pdf(centre, *arg, loc=loc, scale=scale)#*len(data.values)/2
+        else:
+            pdf_fitted = dist.pdf(centre, loc=loc, scale=scale)#*len(data.values)/2
+        plt.plot(pdf_fitted, lw=2, label=dist_name)
+        plt.xlim(0,10)
+    plt.hist(waves,bins=10, lw=4, range=(0,10), density=True, color='peachpuff')
+    plt.legend()
+    plt.savefig(f'..\\..\\graphs\\buoy_dist\\{location}_dist.svg', format='svg')
+# %%
+#doesn't work
+for location in locations:
+    fig = plt.figure()
+    waves = csv_buoys[location].swh.dropna().values
+    for dist_name in dist_names:
+        distdist=distfit(distr=dist_name)
+        distdist = distdist.fit_transform(waves)
+        #plt.plot(pdf_fitted, lw=2, label=dist_name)
+        #plt.xlim(0,10)
+        distdist.plot()
+    plt.hist(waves,bins=10, lw=4, range=(0,10), density=True, color='peachpuff')
+    plt.legend()
+    plt.savefig(f'..\\..\\graphs\\buoy_dist\\{location}_distfit.svg', format='svg')
+# %%
+#compare buoy and era5 dist on one graph (based on lognorm graph)
+for location in locations:
+    fig = plt.figure()
+    buoy_swh = csv_buoys[location].swh.dropna().values
+    era_swh = era_dict[location].swh.dropna().values
+    ds = [buoy_swh, era_swh]
+
+    dist = getattr(scipy.stats, 'lognorm')
+    for data in ds:
+        params = dist.fit(data)
+        arg = params[:-2]
+        loc = params[-2]
+        scale = params[-1]
+
+        if arg:
+            pdf_fitted = dist.pdf(centre, *arg, loc=loc, scale=scale)
+        else:
+            pdf_fitted = dist.pdf(centre, loc=loc, scale=scale)
+        if ds.index(data)==0:
+            name = 'buoy'
+        elif ds.index(data)==1:
+            name = 'ERA5'
+        plt.plot(pdf_fitted, lw=2, label=name)
+    plt.hist(buoy_swh,bins=10, lw=4, range=(0,10), density=True, color='peachpuff')
+    plt.xlim(0,10)
+    plt.legend()
+    plt.savefig(f'..\\..\\graphs\\buoy_dist\\{location}_era-buoy.svg', format='svg')
 # %%
