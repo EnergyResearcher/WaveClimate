@@ -162,15 +162,16 @@ def create_era_series(nc_reference, csv_buoys):
         print(f'{len(csv_buoys)-list(csv_buoys.keys()).index(location)} out of {len(csv_buoys)} files left')
     return reference_files
 # %%
-csv_buoys = filter_buoys(buoy_data, 0.25, degrees=(0.5,0.5))
+csv_buoys = filter_buoys(buoy_data, 0.5, degrees=(0.5,0.5))
 # %%
 era_dict = create_era_series(era, csv_buoys)
 # %%
-
+locations = list(csv_buoys.keys())
+locations
+# %%
+era_dict[(58.4292, -6.9133000000000004)].to_csv('era_584292-069133.csv')
 # %%
 dist = distfit(distr='full')
-# %%
-
 # %%
 def calc_stats(obs,frcst):
     bias = (frcst - obs).mean()
@@ -195,7 +196,7 @@ def calc_stats(obs,frcst):
 data_stats = pd.DataFrame(
     columns=['lat','lon', 'duration', 'bias', 'rmse', 're', 'si', 'cc', 'lsf'],
     index=range(len(csv_buoys)))
-locations = list(csv_buoys.keys())
+
 for location in locations:
     row = locations.index(location)
     stats = calc_stats(csv_buoys[location].swh, era_dict[location].swh)
@@ -279,34 +280,39 @@ data = csv_buoys[(51.879200000000004,1.488)].swh.dropna()
 # %%
 data.values
 # %%
-values, bins, hist = plt.hist(data.values,bins=10, lw=4, range=(0,5))
+values, bins, hist = plt.hist(data.values,bins=50, lw=4, range=(0,5))
 centre = (bins[:-1] + bins[1:])/2
 #plt.hist(data.values, density=True)
-plt.plot(centre,scipy.stats.exponweib.pdf(centre, *params)*len(data.values), 'r-')
+#plt.plot(centre,scipy.stats.exponweib.pdf(centre, *params)*len(data.values), 'r-')
 # %%
 dist_names = ['weibull_min', 'rayleigh', 'lognorm']
 locations = list(csv_buoys.keys())
-
+#%%
+for dist_name in dist_names:
+    dist = getattr(scipy.stats, dist_name)
+    print(dist.ppf(0.99, 1))
 # %%
-#this is the working code
+#this is the working code but distributions don't seem to fit
 for location in locations:
     fig = plt.figure()
     waves = csv_buoys[location].swh.dropna().values
+    
     for dist_name in dist_names:
         dist = getattr(scipy.stats, dist_name)
         params = dist.fit(waves)
         arg = params[:-2]
         loc = params[-2]
         scale = params[-1]
+        x = np.linspace(dist.ppf(0.01,*arg), dist.ppf(0.99,*arg),50)
         if arg:
-            pdf_fitted = dist.pdf(centre, *arg, loc=loc, scale=scale)#*len(data.values)/2
+            pdf_fitted = dist.pdf(x, *arg, loc=loc, scale=scale)
         else:
-            pdf_fitted = dist.pdf(centre, loc=loc, scale=scale)#*len(data.values)/2
+            pdf_fitted = dist.pdf(x, loc=loc, scale=scale)
         plt.plot(pdf_fitted, lw=2, label=dist_name)
-        plt.xlim(0,10)
-    plt.hist(waves,bins=10, lw=4, range=(0,10), density=True, color='peachpuff')
+        #plt.xlim(0,15)
+    plt.hist(waves,bins=50, range=(0,15), density=True, color='peachpuff')
     plt.legend()
-    plt.savefig(f'..\\..\\graphs\\buoy_dist\\{location}_dist.svg', format='svg')
+    plt.savefig(f'..\\..\\graphs\\test\\{location}_dist.svg', format='svg')
 # %%
 #doesn't work
 for location in locations:
