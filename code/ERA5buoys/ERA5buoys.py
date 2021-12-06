@@ -11,7 +11,6 @@ import glob
 from basicfunc import round_to, proximity_calc, DM_to_DecDeg
 #import info
 import analysis
-from distfit import distfit
 import scipy
 import scipy.stats
 #from analysis import get_info_from_filename
@@ -77,8 +76,13 @@ def arrange_files(file_list, column_names):
         #convert time column to the same format as ERA5 and set it as index
         #(parse_dates and simpler time conversion didn't return expected
         # results, hence complicated conversion)
-        csv.time = pd.to_datetime(csv.time)
-        csv = csv.set_index('time')
+        last = len(csv)
+        #print(f'1. start: {csv.time[0]}, end: {csv.time[last-1]}')
+        csv.time = pd.to_datetime(csv.time, format='%d/%m/%Y %H:%M')
+        #print(f'2. start: {csv.time[0]}, end: {csv.time[last-1]}')
+        csv = csv.set_index(csv.time)
+        csv = csv.drop(columns=['time'])
+        #print(f'3. start: {csv.index[0]}, end: {csv.index[-1]}')
         info = get_info_from_filename(file)
         #resample if required
         if (csv.index[1] - csv.index[0])== pd.Timedelta(1, unit='hour'):
@@ -86,6 +90,7 @@ def arrange_files(file_list, column_names):
                 csv.index = csv.index - pd.Timedelta(csv.index[0].minute, 'T')
         else:
             csv = csv.resample('H').mean()
+        #print(f'4. start: {csv.index[0]}, end: {csv.index[-1]}')
         csv_dfs[(info['lat'], info['lon'])] = csv[csv.index < pd.to_datetime('20210101')]
         print(f'{len(file_list)-file_list.index(file)} out of {len(file_list)} files left')
     return csv_dfs
@@ -173,7 +178,6 @@ locations
 def calc_stats(obs,frcst):
     bias = (frcst - obs).mean()
     rmse = np.sqrt(((frcst - obs)**2).mean())
-    re = (abs(frcst-obs)/obs*100).mean()
     si = np.sqrt(
         (((frcst-frcst.mean())-(obs-obs.mean()))**2).mean()
         )/obs.mean()
@@ -188,7 +192,7 @@ def calc_stats(obs,frcst):
         ((obs*frcst).sum() - (obs.sum()*frcst.sum())/
         num_pairs)
     )
-    return {'bias':bias, 'rmse':rmse, 're':re, 'si':si, 'cc':cc, 'lsf':lsf}
+    return {'bias':bias, 'rmse':rmse, 'si':si, 'cc':cc, 'lsf':lsf}
 # %%
 data_stats = pd.DataFrame(
     columns=['lat','lon', 'duration', 'bias', 'rmse', 're', 'si', 'cc', 'lsf'],
@@ -213,7 +217,7 @@ for location in locations:
 def stats_table(ref_dict, obs_dict):
     #works for swh only, if other variables needed, make changes
     data_stats = pd.DataFrame(
-        columns=['lat','lon', 'duration', 'bias', 'rmse', 're', 'si', 'cc', 'lsf'],
+        columns=['lat','lon', 'duration', 'records', 'bias', 'rmse', 're', 'si', 'cc', 'lsf'],
         index=range(len(obs_dict)))
     locations = list(obs_dict.keys())
     for location in locations:
@@ -224,89 +228,60 @@ def stats_table(ref_dict, obs_dict):
         data_stats.loc[row, 'duration'] = round_to(len(pd.date_range(
             start=min(obs_dict[location].index), end=max(
                 obs_dict[location].index), freq='D'))/365, 0.1)
+        frequency = (obs_dict[location].index[1]-obs_dict[location].index[0]).seconds
+        if frequency==1.0:
+            data_stats.loc[row, 'records'] = round_to(len(obs_dict.swh.dropna())/8760, 0.1)
+        else:
+            data_stats.loc[row, 'records'] = round_to(len(obs_dict.swh.dropna())/17520, 0.1)
     
         data_stats.loc[row, 'bias'] = stats['bias']
         data_stats.loc[row, 'rmse'] = stats['rmse']
-        data_stats.loc[row, 're'] = stats['re']
         data_stats.loc[row, 'si'] = stats['si']
         data_stats.loc[row, 'cc'] = stats['cc']
         data_stats.loc[row, 'lsf'] = stats['lsf']
 # %%
-
+def stats_table(obs_dict, ref_dict, var):
+    #make a map for the var names which are different in era and buoys
+    data_stats = pd.DataFrame(
+        columns=['lat','lon', 'duration', 'records', 'bias', 'rmse', 'si', 'cc', 'lsf'],
+        index=range(len(obs_dict)))
+    locations = list(obs_dict.keys())
+    for location in locations:
+        row = locations.index(location)
+        stats = calc_stats(obs_dict[location][var], ref_dict[location][var])
+        data_stats.loc[row, 'lat'] = location[0]
+        data_stats.loc[row, 'lon'] = location[1]
+        data_stats.loc[row, 'duration'] = round_to(len(pd.date_range(
+            start=min(obs_dict[location].index), end=max(
+                obs_dict[location].index), freq='D'))/365, 0.1)
+        frequency = (obs_dict[location].index[1]-obs_dict[location].index[0]).seconds
+        if frequency/3600==1.0:
+            data_stats.loc[row, 'records'] = round_to(len(obs_dict[location][var].dropna())/8760, 0.1)
+        else:
+            data_stats.loc[row, 'records'] = round_to(len(obs_dict[location][var].dropna())/17520, 0.1)
+    
+        data_stats.loc[row, 'bias'] = stats['bias']
+        data_stats.loc[row, 'rmse'] = stats['rmse']
+        data_stats.loc[row, 'si'] = stats['si']
+        data_stats.loc[row, 'cc'] = stats['cc']
+        data_stats.loc[row, 'lsf'] = stats['lsf']
+    return data_stats
 # %%
 csv_buoys[(51.879200000000004,1.488)].columns = ['m0wp', 'swh', 'nan']
 csv_buoys[(51.879200000000004,1.488)] = csv_buoys[(51.879200000000004,1.488)].drop(columns = ['nan'])
 # %%
 selection = ['lognorm','exponweib']
 #%%
-for dist_name in dist_names:
-    dist = getattr(scipy.stats, dist_name)
-    print(dist.ppf(0.99, 1))
+stats = stats_table(csv_buoys, era_dict, 'swh')
+stats.to_csv('..\\..\\output_data\\swh_general_stats_v1.csv')
 # %%
-#this is the working code but distributions don't seem to fit
-for location in locations:
-    fig = plt.figure()
-    waves = csv_buoys[location].swh.dropna().values
-    
-    for dist_name in dist_names:
-        dist = getattr(scipy.stats, dist_name)
-        params = dist.fit(waves)
-        arg = params[:-2]
-        loc = params[-2]
-        scale = params[-1]
-        x = np.linspace(dist.ppf(0.01,*arg), dist.ppf(0.99,*arg),50)
-        if arg:
-            pdf_fitted = dist.pdf(x, *arg, loc=loc, scale=scale)
-        else:
-            pdf_fitted = dist.pdf(x, loc=loc, scale=scale)
-        plt.plot(pdf_fitted, lw=2, label=dist_name)
-        #plt.xlim(0,15)
-    plt.hist(waves,bins=50, range=(0,15), density=True, color='peachpuff')
-    plt.legend()
-    plt.savefig(f'..\\..\\graphs\\test\\{location}_dist.svg', format='svg')
+round_to(len(pd.date_range(
+            start=min(csv_buoys[(51.359, -6.148000000000001)].index), end=max(
+                csv_buoys[(51.359, -6.148000000000001)].index), freq='D'))/365, 0.1)
 # %%
-#doesn't work
-for location in locations:
-    fig = plt.figure()
-    waves = csv_buoys[location].swh.dropna().values
-    for dist_name in dist_names:
-        distdist=distfit(distr=dist_name)
-        distdist = distdist.fit_transform(waves)
-        #plt.plot(pdf_fitted, lw=2, label=dist_name)
-        #plt.xlim(0,10)
-        distdist.plot()
-    plt.hist(waves,bins=10, lw=4, range=(0,10), density=True, color='peachpuff')
-    plt.legend()
-    plt.savefig(f'..\\..\\graphs\\buoy_dist\\{location}_distfit.svg', format='svg')
-# %%
-#compare buoy and era5 dist on one graph (based on lognorm graph)
-for location in locations:
-    fig = plt.figure()
-    buoy_swh = csv_buoys[location].swh.dropna().values
-    era_swh = era_dict[location].swh.dropna().values
-    ds = [buoy_swh, era_swh]
-
-    dist = getattr(scipy.stats, 'lognorm')
-    for data in ds:
-        params = dist.fit(data)
-        arg = params[:-2]
-        loc = params[-2]
-        scale = params[-1]
-
-        if arg:
-            pdf_fitted = dist.pdf(centre, *arg, loc=loc, scale=scale)
-        else:
-            pdf_fitted = dist.pdf(centre, loc=loc, scale=scale)
-        if ds.index(data)==0:
-            name = 'buoy'
-        elif ds.index(data)==1:
-            name = 'ERA5'
-        plt.plot(pdf_fitted, lw=2, label=name)
-    plt.hist(buoy_swh,bins=10, lw=4, range=(0,10), density=True, color='peachpuff')
-    plt.xlim(0,10)
-    plt.legend()
-    plt.savefig(f'..\\..\\graphs\\buoy_dist\\{location}_era-buoy.svg', format='svg')
-# %%
+max(csv_buoys[(51.359, -6.148000000000001)].index)-min(csv_buoys[(51.359, -6.148000000000001)].index)
+#buoy_data[(51.359, -6.148000000000001)]
+#%%
 # code from stack overflow:
 # https://stackoverflow.com/questions/6620471/fitting-empirical-distribution-to-theoretical-ones-with-scipy-python
 from scipy.stats._continuous_distns import _distn_names
@@ -406,7 +381,7 @@ for location in locations:
     ax = waves.plot(kind='hist',bins=35, density=True, color='peachpuff', label='buoy')
     buoy_distr = best_fit_distribution(waves, 200)
     era_distr = best_fit_distribution(era_swh, 200)
-    colors = ['blue','orange']
+    colors = ['limegreen','purple']
     #plot buoy distributions
     for bdistr in buoy_distr:
         ax = plt.plot(
@@ -441,39 +416,22 @@ dfs1 = pd.concat(dfs, axis=1)
 dfs1
 dfs1.to_csv('distributions31.csv')
 #%%
-
+# check #available data points and the frequency of the observations
+csv_buoys[(51.359, -6.148000000000001)].index
 #%%
-
-#%%
-
+era_dict[(51.359, -6.148000000000001)].index
 # %%
-waves = pd.Series(csv_buoys[(51.168, -5.355)].swh.dropna().values)
-#plot for comparison
-plt.figure(figsize=(12,8))
-ax = waves.plot(kind='hist',bins=25, density=True, color='peachpuff')
-#save plot limits
-#dataYLim = ax.get_ylim()
-distributions = best_fit_distribution(waves, 200, ax)
-#best_fit = distributions[0]
-#update plots
-#ax.set_ylim(dataYLim)
-#make PDF with best params
-#pdf = make_pdf(best_fit[0], best_fit[1])
-
-#Display
-#plt.figure(figsize=(12,8))
-#ax = pdf.plot(legend=True)
-#waves.plot(kind='hist',bins=25, density=True, color='peachpuff')
-
-plt.legend(['rayleigh','lognorm','geninvgauss','exponweib','gengamma','johnsonsb','weibull_min','buoy'])
- # %% 
-
+calc_stats(csv_buoys[(56.188, -2.5038)].swh, era_dict[(56.188, -2.5038)].swh)
 # %%
-
+for location in locations:
+    print(location)
+    calc_stats(csv_buoys[location].swh, era_dict[location].swh)
 # %%
-
+round_to(len(csv_buoys[(51.359, -6.148000000000001)]['swh'].dropna())/8760, 0.1)
 # %%
-
+csv_buoys[(56.188, -2.5038)].swh
 # %%
-
+era_dict[(56.188, -2.5038)].swh
+# %%
+era.sel({'latitude':56, 'longitude':-2.5}).pp1d.plot()
 # %%
