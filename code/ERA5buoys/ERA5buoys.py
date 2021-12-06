@@ -168,10 +168,7 @@ era_dict = create_era_series(era, csv_buoys)
 # %%
 locations = list(csv_buoys.keys())
 locations
-# %%
-era_dict[(58.4292, -6.9133000000000004)].to_csv('era_584292-069133.csv')
-# %%
-dist = distfit(distr='full')
+
 # %%
 def calc_stats(obs,frcst):
     bias = (frcst - obs).mean()
@@ -235,58 +232,12 @@ def stats_table(ref_dict, obs_dict):
         data_stats.loc[row, 'cc'] = stats['cc']
         data_stats.loc[row, 'lsf'] = stats['lsf']
 # %%
-dstrs = pd.DataFrame()
-locations = list(csv_buoys.keys())
-for location in locations:
-    dist.fit_transform(csv_buoys[location].swh.dropna())
-    dstrs = pd.concat([dstrs, dist.summary[dist.summary.index==0]])
-# %%
 
-# %%
-dstrs_lognorm = pd.DataFrame()
-dist = distfit(distr='lognorm')
-for location in locations:
-    dist.fit_transform(csv_buoys[location].swh.dropna())
-    dstrs_lognorm = pd.concat([dstrs_lognorm, dist.summary[dist.summary.index==0]])
-    
-# %%
-dstrs_lognorm.index = (range(len(dstrs_lognorm)))
-dstrs_lognorm
-# %%
-dstrs_era = pd.DataFrame()
-dist = distfit(distr='lognorm')
-for location in locations:
-    dist.fit_transform(era_dict[location].swh.dropna())
-    dstrs_era = pd.concat([dstrs_era, dist.summary[dist.summary.index==0]])
-# %%
-dstrs_era.index = range(len(dstrs_era))
-dstrs_era
 # %%
 csv_buoys[(51.879200000000004,1.488)].columns = ['m0wp', 'swh', 'nan']
 csv_buoys[(51.879200000000004,1.488)] = csv_buoys[(51.879200000000004,1.488)].drop(columns = ['nan'])
 # %%
-dist.summary
-# %%
-
-# %%
-params = scipy.stats.distributions.weibull_min.fit(data.values, floc=0)
-params
-#shape = params[1]
-#scale = params[3]
-#x = np.linspace(0,30, 2630)
-#fitted_data = scipy.stats.distributions.exponweib.pdf(data.values, shape, scale)
-# %%
-data = csv_buoys[(51.879200000000004,1.488)].swh.dropna()
-# %%
-data.values
-# %%
-values, bins, hist = plt.hist(data.values,bins=50, lw=4, range=(0,5))
-centre = (bins[:-1] + bins[1:])/2
-#plt.hist(data.values, density=True)
-#plt.plot(centre,scipy.stats.exponweib.pdf(centre, *params)*len(data.values), 'r-')
-# %%
-dist_names = ['weibull_min', 'rayleigh', 'lognorm']
-locations = list(csv_buoys.keys())
+selection = ['lognorm','exponweib']
 #%%
 for dist_name in dist_names:
     dist = getattr(scipy.stats, dist_name)
@@ -355,4 +306,174 @@ for location in locations:
     plt.xlim(0,10)
     plt.legend()
     plt.savefig(f'..\\..\\graphs\\buoy_dist\\{location}_era-buoy.svg', format='svg')
+# %%
+# code from stack overflow:
+# https://stackoverflow.com/questions/6620471/fitting-empirical-distribution-to-theoretical-ones-with-scipy-python
+from scipy.stats._continuous_distns import _distn_names
+import warnings
+#dstr_names = ['levy', 'wrapcauchy', 'weibull_min', 'rayleigh', 'lognorm','expon', 'pareto','gamma', 'genextreme', 'beta', 't']
+# %%
+#Create models from data
+def best_fit_distribution(data, bins=200, ax=None):
+    """Model data by finding best fit distribution to data"""
+    #Get histogram of original data
+    y, x = np.histogram(data, bins=bins, density=True)
+    x = (x+np.roll(x,-1))[:-1]/2.0
+    
+    #Best holders
+    best_distributions = []
+
+    #Estimate distribution parameters from data
+    for ii, distribution in enumerate(
+        [d for d in selection if not d in ['levy_stable','studentized_range']]):
+        print("{:>3} / {:<3}: {}".format( ii+1, len(selection),distribution))
+
+        distribution = getattr(scipy.stats, distribution)
+
+        #Try to fit the distribution
+        try:
+            #Ignore warnings from data that can't be fit
+            with warnings.catch_warnings():
+                warnings.filterwarnings('ignore')
+
+                #fit dist to data
+                params = distribution.fit(data)
+
+                #Separate parts of parameters
+                arg = params[:-2]
+                loc = params[-2]
+                scale = params[-1]
+
+                #Calculate fitted PDF and error with fit in distribution
+                pdf = distribution.pdf(x, loc=loc, scale=scale, *arg)
+                sse = np.sum(np.power(y-pdf, 2.0))
+
+                #if axis pass in add to plot
+                try:
+                    if ax:
+                        pd.Series(pdf,x).plot(ax=ax)
+                        end
+                except Exception:
+                    pass
+
+                #identify if this distribution is better
+                best_distributions.append((distribution, params, sse))
+        
+        except Exception:
+            pass
+    return sorted(best_distributions, key=lambda x:x[2]) 
+        
+# %%
+def make_pdf(dist, params, size=10000):
+    """Generate distributions' Probability Distrubution Function"""
+
+    #Separate parts of parameters
+    arg = params[:-2]
+    loc = params[-2]
+    scale = params[-1]
+
+    #Get the start and end points of distribution
+    if arg:
+        start = dist.ppf(0.01, *arg, loc=loc, scale=scale)
+        end = dist.ppf(0.99, *arg, loc=loc, scale=scale)
+    else:
+        start = dist.ppf(0.01, loc=loc, scale=scale)
+        end = dist.ppf(0.99, loc=loc, scale=scale)
+    
+    #Build PDF and turn into pandas Series
+    x = np.linspace(start, end, size)
+    y = dist.pdf(x, loc=loc, scale=scale, *arg)
+    pdf = pd.Series(y, x)
+
+    return pdf
+# %%
+# plotting 2 distributions with a histogram (working)
+for location in locations:
+    waves = pd.Series(csv_buoys[location].swh.dropna().values)
+    fig, ax = plt.subplots(figsize=(12,8))
+    waves.plot(axes=ax, kind='hist',bins=35, density=True, color='peachpuff')
+    distributions = best_fit_distribution(waves, 200, ax)
+    plt.legend(['lognorm','exponweib','buoy'])
+    plt.savefig(f'..\\..\\graphs\\era_vs_buoys\\{location}_dist.svg')
+    #dists_dic[location] = distributions
+# %%
+buoy_dists_dic = {}
+era_dists_dic = {}
+for location in locations:
+    waves = pd.Series(csv_buoys[location].swh.dropna().values)
+    #era_swh = pd.Series(era_dict[location].swh.dropna().values)
+    plt.figure(figsize=(12,8))
+    ax = waves.plot(kind='hist',bins=30, density=True, color='peachpuff', label='buoy')
+    buoy_distr = best_fit_distribution(waves, 200, ax)
+    #era_distr = best_fit_distribution(era_swh, 200)
+    colors = ['blue','orange']
+    #plot buoy distributions
+    #for bdistr in buoy_distr:
+     #   ax = plt.plot(
+      #      make_pdf(bdistr[0], bdistr[1]),
+       #     color=colors[buoy_distr.index(bdistr)], linestyle='-',
+        #    label='buoy:{}'.format(bdistr[0].name))
+
+    #plot ERA5 distributions
+    #for edistr in era_distr:
+     #   ax = plt.plot(
+      #      make_pdf(edistr[0], edistr[1]),
+       #     color=colors[era_distr.index(edistr)], linestyle='--',
+        #    label='buoy:{}'.format(edistr[0].name))
+
+    plt.legend()
+    plt.savefig(f'..\\..\\graphs\\era_vs_buoys\\{location}_dist.svg')
+    buoy_dists_dic[location] = buoy_distr
+    #era_dists_dic[location] = era_distr
+#%%
+dfs = []
+for locs, dists in dists_dic.items():
+    distrs = []
+    sse = []
+    for distribution in dists:
+        distrs.append(distribution[0].name)
+        sse.append(distribution[2])
+    loc_df = pd.DataFrame(data={'distr':distrs, 'sse':sse}) 
+    loc_df.columns=pd.MultiIndex.from_product([[locs], ['distr','sse']])
+    dfs.append(loc_df)
+#%%
+dfs1 = pd.concat(dfs, axis=1)
+dfs1
+dfs1.to_csv('distributions31.csv')
+#%%
+
+#%%
+
+#%%
+
+# %%
+waves = pd.Series(csv_buoys[(51.168, -5.355)].swh.dropna().values)
+#plot for comparison
+plt.figure(figsize=(12,8))
+ax = waves.plot(kind='hist',bins=25, density=True, color='peachpuff')
+#save plot limits
+#dataYLim = ax.get_ylim()
+distributions = best_fit_distribution(waves, 200, ax)
+#best_fit = distributions[0]
+#update plots
+#ax.set_ylim(dataYLim)
+#make PDF with best params
+#pdf = make_pdf(best_fit[0], best_fit[1])
+
+#Display
+#plt.figure(figsize=(12,8))
+#ax = pdf.plot(legend=True)
+#waves.plot(kind='hist',bins=25, density=True, color='peachpuff')
+
+plt.legend(['rayleigh','lognorm','geninvgauss','exponweib','gengamma','johnsonsb','weibull_min','buoy'])
+ # %% 
+
+# %%
+
+# %%
+
+# %%
+
+# %%
+
 # %%
