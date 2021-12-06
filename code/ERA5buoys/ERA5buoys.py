@@ -401,30 +401,30 @@ buoy_dists_dic = {}
 era_dists_dic = {}
 for location in locations:
     waves = pd.Series(csv_buoys[location].swh.dropna().values)
-    #era_swh = pd.Series(era_dict[location].swh.dropna().values)
+    era_swh = pd.Series(era_dict[location].swh.dropna().values)
     plt.figure(figsize=(12,8))
-    ax = waves.plot(kind='hist',bins=30, density=True, color='peachpuff', label='buoy')
-    buoy_distr = best_fit_distribution(waves, 200, ax)
-    #era_distr = best_fit_distribution(era_swh, 200)
+    ax = waves.plot(kind='hist',bins=35, density=True, color='peachpuff', label='buoy')
+    buoy_distr = best_fit_distribution(waves, 200)
+    era_distr = best_fit_distribution(era_swh, 200)
     colors = ['blue','orange']
     #plot buoy distributions
-    #for bdistr in buoy_distr:
-     #   ax = plt.plot(
-      #      make_pdf(bdistr[0], bdistr[1]),
-       #     color=colors[buoy_distr.index(bdistr)], linestyle='-',
-        #    label='buoy:{}'.format(bdistr[0].name))
+    for bdistr in buoy_distr:
+        ax = plt.plot(
+            make_pdf(bdistr[0], bdistr[1]),
+            color=colors[buoy_distr.index(bdistr)], linestyle='-',
+            label='buoy:{}'.format(bdistr[0].name))
 
     #plot ERA5 distributions
-    #for edistr in era_distr:
-     #   ax = plt.plot(
-      #      make_pdf(edistr[0], edistr[1]),
-       #     color=colors[era_distr.index(edistr)], linestyle='--',
-        #    label='buoy:{}'.format(edistr[0].name))
-
+    for edistr in era_distr:
+        ax = plt.plot(
+            make_pdf(edistr[0], edistr[1]),
+            color=colors[era_distr.index(edistr)], linestyle='--',
+            label='ERA:{}'.format(edistr[0].name))
+    plt.title(f'Significant wave height PDF at {location}')
     plt.legend()
     plt.savefig(f'..\\..\\graphs\\era_vs_buoys\\{location}_dist.svg')
     buoy_dists_dic[location] = buoy_distr
-    #era_dists_dic[location] = era_distr
+    era_dists_dic[location] = era_distr
 #%%
 dfs = []
 for locs, dists in dists_dic.items():
