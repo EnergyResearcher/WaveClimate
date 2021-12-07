@@ -417,16 +417,19 @@ dfs1
 dfs1.to_csv('distributions31.csv')
 #%%
 #calc stats in bins and temporarily
-bins = np.arange(0, 10.5, 0.5)
+bins = list(np.arange(0, 10.5, 0.5))
 subdfs =[]
 for location in locations:
     binned_stats = pd.DataFrame(
         columns=['bias', 'rmse', 'si', 'cc', 'lsf', 'records'])
     for bin in bins:
-        csv_buoys[location].rounded = round_to(csv_buoys[location].swh,0.5)
-        era_dict[location].rounded = round_to(era_dict[location].swh,0.5)
-        subset_buoys = csv_buoys[location][
-            csv_buoys[location].rounded==bin]
+        try:
+            subset_buoys = csv_buoys[location][
+                (csv_buoys[location].swh >= bin) & (
+                    csv_buoys[location].swh < bins[bins.index(bin)+1])]
+        except:
+            subset_buoys = csv_buoys[location][
+                (csv_buoys[location].swh >= bin) & (csv_buoys[location].swh < 10.5)]
         subset_era = era_dict[location][
             era_dict[location].index.isin(subset_buoys.index)]
         print(f'location: {location}, bin: {bin}, buoy length: {len(subset_buoys)}, era length: {len(subset_era)}')
@@ -451,9 +454,8 @@ binned_results.index.set_names(['latitude', 'longitude', 'bin'], inplace=True)
 # %%
 binned_results
 # %%
-fig, axes = plt.subplots(nrows=)
+fig, axes = plt.subplots(nrows=5)
 for column in binned_results.columns:
 
     for location, data in binned_results.groupby(level=[0,1]):
-        
-# %%
+        hjk
