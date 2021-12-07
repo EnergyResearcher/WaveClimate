@@ -416,22 +416,44 @@ dfs1 = pd.concat(dfs, axis=1)
 dfs1
 dfs1.to_csv('distributions31.csv')
 #%%
-# check #available data points and the frequency of the observations
-csv_buoys[(51.359, -6.148000000000001)].index
-#%%
-era_dict[(51.359, -6.148000000000001)].index
-# %%
-calc_stats(csv_buoys[(56.188, -2.5038)].swh, era_dict[(56.188, -2.5038)].swh)
-# %%
+#calc stats in bins and temporarily
+bins = np.arange(0, 10.5, 0.5)
+subdfs =[]
 for location in locations:
-    print(location)
-    calc_stats(csv_buoys[location].swh, era_dict[location].swh)
+    binned_stats = pd.DataFrame(
+        columns=['bias', 'rmse', 'si', 'cc', 'lsf', 'records'])
+    for bin in bins:
+        csv_buoys[location].rounded = round_to(csv_buoys[location].swh,0.5)
+        era_dict[location].rounded = round_to(era_dict[location].swh,0.5)
+        subset_buoys = csv_buoys[location][
+            csv_buoys[location].rounded==bin]
+        subset_era = era_dict[location][
+            era_dict[location].index.isin(subset_buoys.index)]
+        print(f'location: {location}, bin: {bin}, buoy length: {len(subset_buoys)}, era length: {len(subset_era)}')
+        stat_dict = calc_stats(subset_buoys.swh.values, subset_era.swh.values)
+        statistic=pd.DataFrame(stat_dict, index=[bin])
+        
+        frequency = (csv_buoys[location].index[1]-csv_buoys[location].index[0]).seconds
+        if frequency/3600==1.0:
+            statistic['records'] = round_to(len(subset_buoys)/24, 0.1)
+        else: statistic['records'] = round_to(len(subset_buoys)/48, 0.1)
+        binned_stats = pd.concat([binned_stats, statistic])
+    if binned_stats.records.sum() < 365:
+        continue
+    subdfs.append(binned_stats)
+binned_results = pd.concat(subdfs, keys=locations)
+binned_results.to_csv('binned_swh.csv')
 # %%
-round_to(len(csv_buoys[(51.359, -6.148000000000001)]['swh'].dropna())/8760, 0.1)
+era_dict[(51.359, -6.148000000000001)][era_dict[
+    (51.359, -6.148000000000001)].rounded==1.5]
 # %%
-csv_buoys[(56.188, -2.5038)].swh
+binned_results.index.set_names(['latitude', 'longitude', 'bin'], inplace=True)
 # %%
-era_dict[(56.188, -2.5038)].swh
+binned_results
 # %%
-era.sel({'latitude':56, 'longitude':-2.5}).pp1d.plot()
+fig, axes = plt.subplots(nrows=)
+for column in binned_results.columns:
+
+    for location, data in binned_results.groupby(level=[0,1]):
+        
 # %%
