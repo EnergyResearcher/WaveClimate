@@ -194,51 +194,9 @@ def calc_stats(obs,frcst):
     )
     return {'bias':bias, 'rmse':rmse, 'si':si, 'cc':cc, 'lsf':lsf}
 # %%
-data_stats = pd.DataFrame(
-    columns=['lat','lon', 'duration', 'bias', 'rmse', 're', 'si', 'cc', 'lsf'],
-    index=range(len(csv_buoys)))
 
-for location in locations:
-    row = locations.index(location)
-    stats = calc_stats(csv_buoys[location].swh, era_dict[location].swh)
-    data_stats.loc[row, 'lat'] = location[0]
-    data_stats.loc[row, 'lon'] = location[1]
-    data_stats.loc[row, 'duration'] = round_to(len(pd.date_range(
-        start=min(csv_buoys[location].index), end=max(
-            csv_buoys[location].index), freq='D'))/365, 0.1)
-    
-    data_stats.loc[row, 'bias'] = stats['bias']
-    data_stats.loc[row, 'rmse'] = stats['rmse']
-    data_stats.loc[row, 're'] = stats['re']
-    data_stats.loc[row, 'si'] = stats['si']
-    data_stats.loc[row, 'cc'] = stats['cc']
-    data_stats.loc[row, 'lsf'] = stats['lsf']
 # %%
-def stats_table(ref_dict, obs_dict):
-    #works for swh only, if other variables needed, make changes
-    data_stats = pd.DataFrame(
-        columns=['lat','lon', 'duration', 'records', 'bias', 'rmse', 're', 'si', 'cc', 'lsf'],
-        index=range(len(obs_dict)))
-    locations = list(obs_dict.keys())
-    for location in locations:
-        row = locations.index(location)
-        stats = calc_stats(obs_dict[location].swh, ref_dict[location].swh)
-        data_stats.loc[row, 'lat'] = location[0]
-        data_stats.loc[row, 'lon'] = location[1]
-        data_stats.loc[row, 'duration'] = round_to(len(pd.date_range(
-            start=min(obs_dict[location].index), end=max(
-                obs_dict[location].index), freq='D'))/365, 0.1)
-        frequency = (obs_dict[location].index[1]-obs_dict[location].index[0]).seconds
-        if frequency==1.0:
-            data_stats.loc[row, 'records'] = round_to(len(obs_dict.swh.dropna())/8760, 0.1)
-        else:
-            data_stats.loc[row, 'records'] = round_to(len(obs_dict.swh.dropna())/17520, 0.1)
-    
-        data_stats.loc[row, 'bias'] = stats['bias']
-        data_stats.loc[row, 'rmse'] = stats['rmse']
-        data_stats.loc[row, 'si'] = stats['si']
-        data_stats.loc[row, 'cc'] = stats['cc']
-        data_stats.loc[row, 'lsf'] = stats['lsf']
+
 # %%
 def stats_table(obs_dict, ref_dict, var):
     #make a map for the var names which are different in era and buoys
@@ -275,12 +233,7 @@ selection = ['lognorm','exponweib']
 stats = stats_table(csv_buoys, era_dict, 'swh')
 stats.to_csv('..\\..\\output_data\\swh_general_stats_v1.csv')
 # %%
-round_to(len(pd.date_range(
-            start=min(csv_buoys[(51.359, -6.148000000000001)].index), end=max(
-                csv_buoys[(51.359, -6.148000000000001)].index), freq='D'))/365, 0.1)
-# %%
-max(csv_buoys[(51.359, -6.148000000000001)].index)-min(csv_buoys[(51.359, -6.148000000000001)].index)
-#buoy_data[(51.359, -6.148000000000001)]
+
 #%%
 # code from stack overflow:
 # https://stackoverflow.com/questions/6620471/fitting-empirical-distribution-to-theoretical-ones-with-scipy-python
@@ -445,17 +398,57 @@ for location in locations:
         continue
     subdfs.append(binned_stats)
 binned_results = pd.concat(subdfs, keys=locations)
-binned_results.to_csv('binned_swh.csv')
+#binned_results.to_csv('binned_swh.csv')
 # %%
-era_dict[(51.359, -6.148000000000001)][era_dict[
-    (51.359, -6.148000000000001)].rounded==1.5]
+
 # %%
 binned_results.index.set_names(['latitude', 'longitude', 'bin'], inplace=True)
 # %%
 binned_results
 # %%
-fig, axes = plt.subplots(nrows=5)
-for column in binned_results.columns:
+from matplotlib.pyplot import cm
+# %%
+fig, ax = plt.subplots(nrows=2, ncols=3, sharex=True, sharey=False, figsize=(30,20))
+#graphs = len(binned_results.columns)
+i = 0
+graphs = 0
 
-    for location, data in binned_results.groupby(level=[0,1]):
-        hjk
+while i < ax.shape[0]:
+    j = 0
+    while j < ax.shape[1]:
+    #create plot for every metric and different lines for different locations
+    # probably need to swap the for loops around
+        locs = []
+        color = iter(cm.brg(np.linspace(0,1,len(binned_results.index.unique(level=0)))))
+        for location, data in binned_results.groupby(level=[0,1]):
+        #here location returns a tuple of lat and lon,
+        #data is the corresponding dataframe
+            ax[i,j].plot(bins, data[binned_results.columns[graphs]], linestyle='--', c=next(color))#, color=colours[graphs])
+            locs.append((float('{:.4f}'.format(location[0])),float('{:.4f}'.format(location[1]))))
+        means = []
+        for bin, df in binned_results.groupby(level=[2]):
+            means.append(df[binned_results.columns[graphs]].mean())
+        ax[i,j].plot(bins, means, linestyle='-', lw=6, color='slategray')
+        ax[i,j].grid()
+        ax[i,j].legend(locs+ ['mean'])
+        ax[i,j].tick_params(axis='both', which='major', labelsize=25)
+        ax[i,j].set_ylabel(binned_results.columns[graphs], fontsize=30)
+        if i==1:
+            ax[i,j].set_xlabel('Significant wave height, m', fontsize=30)
+        j += 1
+        graphs += 1
+    i += 1
+    
+fig.tight_layout()
+
+# %%
+fig.savefig(f'..\\..\\graphs\\era_vs_buoys\\BinnedStats.png')
+# %%
+binned_results[binned_results.bias < 0]
+# %%
+print(f'min: {min(binned_results.cc)}, max: {max(binned_results.cc)}')
+# %%
+binned_results['bias'].mean()
+# %%
+len(binned_results.index.unique(level=0))==len(locs)
+# %%
