@@ -1,5 +1,6 @@
 # %%
 import numpy as np
+from numpy.lib.financial import _irr_dispatcher
 import pandas as pd
 from pandas.core.arrays.sparse import dtype
 import seaborn as sns
@@ -22,6 +23,7 @@ md = os.path.dirname(os.path.dirname(os.getcwd())) + '\\input_data'
 # %%
 ERAfiles = glob.glob(md + '\\ERA5\\*.nc')
 era = xr.open_mfdataset(ERAfiles)
+# %%
 
 # %%
 column_names = {
@@ -231,7 +233,7 @@ csv_buoys[(51.879200000000004,1.488)] = csv_buoys[(51.879200000000004,1.488)].dr
 selection = ['lognorm','exponweib']
 #%%
 stats = stats_table(csv_buoys, era_dict, 'swh')
-stats.to_csv('..\\..\\output_data\\swh_general_stats_v1.csv')
+#stats.to_csv('..\\..\\output_data\\swh_general_stats_v1.csv')
 # %%
 
 #%%
@@ -372,7 +374,9 @@ dfs1.to_csv('distributions31.csv')
 #calc stats in bins and temporarily
 bins = list(np.arange(0, 10.5, 0.5))
 subdfs =[]
+long_locs = []
 for location in locations:
+    frequency = (csv_buoys[location].index[1]-csv_buoys[location].index[0]).seconds/3600
     binned_stats = pd.DataFrame(
         columns=['bias', 'rmse', 'si', 'cc', 'lsf', 'records'])
     for bin in bins:
@@ -385,26 +389,26 @@ for location in locations:
                 (csv_buoys[location].swh >= bin) & (csv_buoys[location].swh < 10.5)]
         subset_era = era_dict[location][
             era_dict[location].index.isin(subset_buoys.index)]
-        print(f'location: {location}, bin: {bin}, buoy length: {len(subset_buoys)}, era length: {len(subset_era)}')
+        #print(f'location: {location}, bin: {bin}, buoy length: {len(subset_buoys)}, era length: {len(subset_era)}')
         stat_dict = calc_stats(subset_buoys.swh.values, subset_era.swh.values)
         statistic=pd.DataFrame(stat_dict, index=[bin])
-        
-        frequency = (csv_buoys[location].index[1]-csv_buoys[location].index[0]).seconds
-        if frequency/3600==1.0:
+        if frequency==1.0:
             statistic['records'] = round_to(len(subset_buoys)/24, 0.1)
         else: statistic['records'] = round_to(len(subset_buoys)/48, 0.1)
         binned_stats = pd.concat([binned_stats, statistic])
-    if binned_stats.records.sum() < 365:
+    if binned_stats['records'].sum() < 365:
         continue
     subdfs.append(binned_stats)
-binned_results = pd.concat(subdfs, keys=locations)
-#binned_results.to_csv('binned_swh.csv')
+    long_locs.append(location)
+binned_results = pd.concat(subdfs, keys=long_locs)
 # %%
-
+binned_results.to_csv('binned_swh.csv')
+# %%
+len(long_locs)
 # %%
 binned_results.index.set_names(['latitude', 'longitude', 'bin'], inplace=True)
 # %%
-binned_results
+binned_results#.loc[(50.953, -5.487), 'records'].sum()
 # %%
 from matplotlib.pyplot import cm
 # %%
@@ -424,7 +428,8 @@ while i < ax.shape[0]:
         #here location returns a tuple of lat and lon,
         #data is the corresponding dataframe
             ax[i,j].plot(bins, data[binned_results.columns[graphs]], linestyle='--', c=next(color))#, color=colours[graphs])
-            locs.append((float('{:.4f}'.format(location[0])),float('{:.4f}'.format(location[1]))))
+            eq_years = float(stats.loc[stats.lat==location[0], 'records'])
+            locs.append(f'({location[0]:.4f}, {location[1]:.4f}); {eq_years} eq.years')
         means = []
         for bin, df in binned_results.groupby(level=[2]):
             means.append(df[binned_results.columns[graphs]].mean())
@@ -442,7 +447,7 @@ while i < ax.shape[0]:
 fig.tight_layout()
 
 # %%
-fig.savefig(f'..\\..\\graphs\\era_vs_buoys\\BinnedStats.png')
+fig.savefig(f'..\\..\\graphs\\era_vs_buoys\\BinnedStats.svg')
 # %%
 binned_results[binned_results.bias < 0]
 # %%
@@ -450,5 +455,134 @@ print(f'min: {min(binned_results.cc)}, max: {max(binned_results.cc)}')
 # %%
 binned_results['bias'].mean()
 # %%
-len(binned_results.index.unique(level=0))==len(locs)
+binned_results.index.unique(level=0)
+# %%
+stats.loc[stats.lat==50.938, 'records']
+# %%
+cmsfiles = glob.glob(md + '\\cms\\PotDrifting=0\\*.nc')
+cmsfiles.remove(md + '\\cms\\PotDrifting=0\\GL_WS_MO_44t14.nc')
+cmsfiles.remove(md + '\\cms\\PotDrifting=0\\GL_WS_MO_45t01.nc')
+cmsfiles.remove(md + '\\cms\\PotDrifting=0\\GL_WS_MO_46t29.nc')
+# %%
+
+#%%
+#works
+cms = []#xr.open_mfdataset(cmsfiles)
+for f in cmsfiles:
+    try:
+        cms.append(xr.open_dataset(f))
+    except:
+        print(f)
+# %%
+from decimal import *
+# %%
+#works but crashes
+buoy_dfs = {}
+for ds in cms[:433]:
+    lat = Decimal(ds.geospatial_lat_min)
+    lon = Decimal(ds.geospatial_lon_min)
+    print(ds.platform_code, f'({lat}, {lon})')
+    try:
+        df = ds.sel(
+            POSITION=0, LATITUDE=lat, LONGITUDE=lon, DEPTH=0).drop_dims(
+                ['LATITUDE', 'LONGITUDE']).to_dataframe()
+    except:
+        try:
+        #print(ds.platform_code, f'({lat}, {lon})')
+            df = ds.sel(
+                POSITION=0, LATITUDE=lat, LONGITUDE=lon, DEPTH=0).to_dataframe()
+        except: continue
+    buoy_dfs[(lat, lon)] = df
+    
+# %%
+
+# %%
+
+# %%
+ds1=xr.open_dataset(cmsfiles[0])
+ds2=xr.open_dataset(cmsfiles[1])
+# %%
+# %%
+ds1
+# %%
+exclude_vars = []
+for var in list(ds1.keys()):
+    if var not in vars:
+        exclude_vars.append(var)    
+ds1 = ds1.drop_vars(exclude_vars)
+# %%
+exclude_vars = []
+for var in list(ds2.keys()):
+    if var not in vars:
+        exclude_vars.append(var)    
+ds2 = ds2.drop_vars(exclude_vars)
+# %%
+xr.concat(
+    [ds1.drop_dims(['LATITUDE', 'LONGITUDE']),
+    ds2.drop_dims(['LATITUDE', 'LONGITUDE'])], dim=['TIME', 'DEPTH']).sel(concat_dim='TIME')
+# %%
+
+# %%
+ds1#.drop_dims(['LATITUDE', 'LONGITUDE'])
+# %%
+dstest = ds1
+# %%
+dstest = dstest.assign_coords(LATITUDE=("LATITUDE", 60.8833))
+# %%
+dstest.coords["LATITUDE"] = 60.8833
+# %%
+dstest.expand_dims('LATITUDE')
+# %%
+ds1.coords["LATITUDE"] = ds1.geospatial_lat_min
+ds2.coords["LATITUDE"] = ds2.geospatial_lat_min
+ds1.coords["LONGITUDE"] = ds1.geospatial_lon_min
+ds2.coords["LONGITUDE"] = ds2.geospatial_lon_min
+ds1 = ds1.expand_dims(['LATITUDE', 'LONGITUDE'])
+ds2 = ds2.expand_dims(['LATITUDE', 'LONGITUDE'])
+# %%
+test = xr.concat([ds1, ds2], dim = ['TIME', 'DEPTH'])
+# %%
+# %%
+plt.plot(test.TIME, test.VHM0.mean(('LATITUDE', 'LONGITUDE')))
+# %%
+test.sel(concat_dim=['TIME']).drop('concat_dim').squeeze('concat_dim')#=['DEPTH'])#.VHM0.mean(('LATITUDE', 'LONGITUDE'))
+# %%
+
+# %%
+ds1.LATITUDE.attrs
+# %%
+#works
+dsets = []
+for file in cmsfiles:
+    ds = xr.open_dataset(file)
+    exclude_vars = []
+    for var in list(ds.keys()):
+        if var not in vars:
+            exclude_vars.append(var)    
+    ds = ds.drop_vars(exclude_vars)
+    
+    
+    lat_attr = ds.LATITUDE.attrs
+    lon_attr = ds.LONGITUDE.attrs
+    ds.coords['LATITUDE'] = ds.geospatial_lat_min
+    ds.coords['LONGITUDE'] = ds.geospatial_lon_min
+    ds = ds.expand_dims(['LATITUDE', 'LONGITUDE'])
+    ds.LATITUDE.attrs = lat_attr
+    ds.LONGITUDE.attrs = lon_attr
+    dsets.append(ds)
+# %%
+#doesn't work since the depth dim has different values
+cms_full = xr.concat(dsets[:100], dim = ['TIME'])
+# %%
+
+# %%
+ds_0depth = []
+for ds in dsets:
+    try:
+        ds = ds.sel(DEPTH=0)
+    except: continue
+    ds_0depth.append(ds)
+# %%
+#memory error
+cms_full = xr.concat(ds_0depth[:10], dim = ['TIME'],compat='override')
 # %%
