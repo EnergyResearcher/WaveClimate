@@ -1,6 +1,5 @@
 # %%
 import numpy as np
-from numpy.lib.financial import _irr_dispatcher
 import pandas as pd
 from pandas.core.arrays.sparse import dtype
 import seaborn as sns
@@ -16,7 +15,7 @@ import scipy
 import scipy.stats
 #from analysis import get_info_from_filename
 #from analysis import arrange_files
-
+import dask
 # %%
 md = os.path.dirname(os.path.dirname(os.getcwd())) + '\\input_data'
 
@@ -34,7 +33,6 @@ column_names = {
     'Dominant (peak) wave period (s)':'pwp',
     'Maximum wave height (m)':'mwh',
     'Significant wave height (Hm0) (m)':'swh'}
-
 
 # %%
 def get_info_from_filename(filename):
@@ -66,8 +64,6 @@ def get_info_from_filename(filename):
     file_info['frequency'] = int(parts[5].split('.')[0][:-1])
     return file_info
 #get_info_from_filename(glob.glob(md + '\\buoys\\*.csv')[0])
-# %%
-
 # %%
 def arrange_files(file_list, column_names):
     # columns is a dict for mapping
@@ -175,7 +171,6 @@ era_dict = create_era_series(era, csv_buoys)
 # %%
 locations = list(csv_buoys.keys())
 locations
-
 # %%
 def calc_stats(obs,frcst):
     bias = (frcst - obs).mean()
@@ -195,9 +190,6 @@ def calc_stats(obs,frcst):
         num_pairs)
     )
     return {'bias':bias, 'rmse':rmse, 'si':si, 'cc':cc, 'lsf':lsf}
-# %%
-
-# %%
 
 # %%
 def stats_table(obs_dict, ref_dict, var):
@@ -227,6 +219,7 @@ def stats_table(obs_dict, ref_dict, var):
         data_stats.loc[row, 'lsf'] = stats['lsf']
     return data_stats
 # %%
+#one file from the UK wavenet data has a nan column, this code is to remove it
 csv_buoys[(51.879200000000004,1.488)].columns = ['m0wp', 'swh', 'nan']
 csv_buoys[(51.879200000000004,1.488)] = csv_buoys[(51.879200000000004,1.488)].drop(columns = ['nan'])
 # %%
@@ -327,6 +320,7 @@ for location in locations:
     plt.savefig(f'..\\..\\graphs\\era_vs_buoys\\{location}_dist.svg')
     #dists_dic[location] = distributions
 # %%
+#compare two distributions on ERA5 and buoy data on a plot + histogram
 buoy_dists_dic = {}
 era_dists_dic = {}
 for location in locations:
@@ -356,6 +350,8 @@ for location in locations:
     buoy_dists_dic[location] = buoy_distr
     era_dists_dic[location] = era_distr
 #%%
+#code on the assumption that all distributions are used and compared in a 
+# table using sse value (measure of how well a distr fits the data)
 dfs = []
 for locs, dists in dists_dic.items():
     distrs = []
@@ -367,6 +363,7 @@ for locs, dists in dists_dic.items():
     loc_df.columns=pd.MultiIndex.from_product([[locs], ['distr','sse']])
     dfs.append(loc_df)
 #%%
+#save the data from above cell to a file
 dfs1 = pd.concat(dfs, axis=1)
 dfs1
 dfs1.to_csv('distributions31.csv')
@@ -404,12 +401,11 @@ binned_results = pd.concat(subdfs, keys=long_locs)
 # %%
 binned_results.to_csv('binned_swh.csv')
 # %%
-len(long_locs)
-# %%
 binned_results.index.set_names(['latitude', 'longitude', 'bin'], inplace=True)
+
 # %%
-binned_results#.loc[(50.953, -5.487), 'records'].sum()
-# %%
+# this and 2 cells below to plot the calculated stats for comparing ERA5
+# and buoy data
 from matplotlib.pyplot import cm
 # %%
 fig, ax = plt.subplots(nrows=2, ncols=3, sharex=True, sharey=False, figsize=(30,20))
@@ -449,30 +445,12 @@ fig.tight_layout()
 # %%
 fig.savefig(f'..\\..\\graphs\\era_vs_buoys\\BinnedStats.svg')
 # %%
-binned_results[binned_results.bias < 0]
-# %%
-print(f'min: {min(binned_results.cc)}, max: {max(binned_results.cc)}')
-# %%
-binned_results['bias'].mean()
-# %%
-binned_results.index.unique(level=0)
-# %%
-stats.loc[stats.lat==50.938, 'records']
-# %%
 cmsfiles = glob.glob(md + '\\cms\\PotDrifting=0\\*.nc')
 cmsfiles.remove(md + '\\cms\\PotDrifting=0\\GL_WS_MO_44t14.nc')
 cmsfiles.remove(md + '\\cms\\PotDrifting=0\\GL_WS_MO_45t01.nc')
 cmsfiles.remove(md + '\\cms\\PotDrifting=0\\GL_WS_MO_46t29.nc')
 # %%
 
-#%%
-#works
-cms = []#xr.open_mfdataset(cmsfiles)
-for f in cmsfiles:
-    try:
-        cms.append(xr.open_dataset(f))
-    except:
-        print(f)
 # %%
 from decimal import *
 # %%
@@ -497,61 +475,41 @@ for ds in cms[:433]:
 # %%
 
 # %%
+#testing code? should work
 
-# %%
 ds1=xr.open_dataset(cmsfiles[0])
 ds2=xr.open_dataset(cmsfiles[1])
-# %%
-# %%
-ds1
-# %%
 exclude_vars = []
 for var in list(ds1.keys()):
     if var not in vars:
         exclude_vars.append(var)    
 ds1 = ds1.drop_vars(exclude_vars)
-# %%
 exclude_vars = []
 for var in list(ds2.keys()):
     if var not in vars:
         exclude_vars.append(var)    
 ds2 = ds2.drop_vars(exclude_vars)
-# %%
 xr.concat(
     [ds1.drop_dims(['LATITUDE', 'LONGITUDE']),
     ds2.drop_dims(['LATITUDE', 'LONGITUDE'])], dim=['TIME', 'DEPTH']).sel(concat_dim='TIME')
-# %%
-
-# %%
-ds1#.drop_dims(['LATITUDE', 'LONGITUDE'])
-# %%
-dstest = ds1
-# %%
-dstest = dstest.assign_coords(LATITUDE=("LATITUDE", 60.8833))
-# %%
-dstest.coords["LATITUDE"] = 60.8833
-# %%
-dstest.expand_dims('LATITUDE')
-# %%
 ds1.coords["LATITUDE"] = ds1.geospatial_lat_min
 ds2.coords["LATITUDE"] = ds2.geospatial_lat_min
 ds1.coords["LONGITUDE"] = ds1.geospatial_lon_min
 ds2.coords["LONGITUDE"] = ds2.geospatial_lon_min
 ds1 = ds1.expand_dims(['LATITUDE', 'LONGITUDE'])
 ds2 = ds2.expand_dims(['LATITUDE', 'LONGITUDE'])
-# %%
 test = xr.concat([ds1, ds2], dim = ['TIME', 'DEPTH'])
-# %%
-# %%
-plt.plot(test.TIME, test.VHM0.mean(('LATITUDE', 'LONGITUDE')))
-# %%
 test.sel(concat_dim=['TIME']).drop('concat_dim').squeeze('concat_dim')#=['DEPTH'])#.VHM0.mean(('LATITUDE', 'LONGITUDE'))
 # %%
 
 # %%
-ds1.LATITUDE.attrs
+vars = ['VRM02','VRZA','VRPK','VGHS','VHM0']
+# %%
+
 # %%
 #works
+# read files, exclude undesired vars, add lon-lat to coordinates and
+# save their attributes. Save all resulting datasets to list  
 dsets = []
 for file in cmsfiles:
     ds = xr.open_dataset(file)
@@ -561,7 +519,7 @@ for file in cmsfiles:
             exclude_vars.append(var)    
     ds = ds.drop_vars(exclude_vars)
     
-    
+    #print(f'location: {ds.platform_code}; {list(ds.keys())}')
     lat_attr = ds.LATITUDE.attrs
     lon_attr = ds.LONGITUDE.attrs
     ds.coords['LATITUDE'] = ds.geospatial_lat_min
@@ -574,15 +532,85 @@ for file in cmsfiles:
 #doesn't work since the depth dim has different values
 cms_full = xr.concat(dsets[:100], dim = ['TIME'])
 # %%
-
-# %%
 ds_0depth = []
 for ds in dsets:
     try:
         ds = ds.sel(DEPTH=0)
     except: continue
-    ds_0depth.append(ds)
+    ds_0depth.append(ds.VHM0)
 # %%
-#memory error
-cms_full = xr.concat(ds_0depth[:10], dim = ['TIME'],compat='override')
+#memory error - new error now for some reason
+cms_full = xr.concat(ds_0depth[:2], dim = ['TIME'], fill_value=None)#, data_vars=['VHM0'])#,compat='override')
+
 # %%
+
+# %%
+#trying to convert all files to a massive dask dataframe to then use
+#as with the previous code
+from dask.distributed import Client, progress
+client = Client()
+client.dashboard_link
+# %%
+
+# %%
+#create a dict to use with the previously defined functions
+# check the duration of the 
+dds_dict = {}
+not_in_dict = []
+for ds in dsets:
+    try:
+        ds = ds.sel(DEPTH=0)
+    except: 
+        print(f'location: {ds.platform_code}')
+        not_in_dict.append(ds.platform_code)
+        continue
+    lat = ds.LATITUDE
+    lon = ds.LONGITUDE
+    dd = ds.sel(LATITUDE=lat, LONGITUDE=lon).to_dask_dataframe()
+    dds_dict[(float(lat),float(lon))] = dd
+#dsets[0].sel(LATITUDE='60.8833',LONGITUDE='20.7500', DEPTH=0)
+#line above returns a ds 
+# %%
+#works but it compares lat and lon separately, hence it returns way too many 
+# locations, potential to modify the func
+cms_buoys = filter_buoys(dds_dict, 0.5, degrees=(0.5,0.5))
+# %%
+#returns an error since index is not "indexable" (dd.index works, 
+# dd.index[0] doesn't - use dd.loc instead)
+era_cms = create_era_series(era, cms_buoys)
+# %%
+for location, data in cms_buoys.items():
+    print(location)
+    print(data.index[0])
+# %%
+def create_era_series(nc_reference, csv_buoys):
+    #sampling should be in time format of python ('1d', '10y' etc)
+    #nc_reference is a 3D netCDF file
+    #csv_buoys 
+    
+    # the function is to select data from ERA5 file that matches files with buoy data
+    # in terms of locations and time period. The data is then converted to pd.DataFrame
+    reference_files = {}
+    for location, data in csv_buoys.items():
+        #select netCDF part where the time and location 
+        #corresponds to the observations
+        nc_lat, nc_lon = round_to(location[0],0.5), round_to(location[1],0.5)
+        print(f'location: {location},line 154')
+        try:
+            nc_start, nc_end = data.index[0], data.index[-1]
+            print(f'location: {location},line 157')
+            time_query = (nc_reference.time >= nc_start) & (nc_reference.time <= nc_end)
+        except:
+            nc_start, nc_end = np.datetime64(data.index[0]), np.datetime64(data.index[1])
+            time_query = (nc_reference.time >= nc_start) & (nc_reference.time <= nc_end)
+        print(f'location: {location},line 162')
+        new_nc = nc_reference.sel(
+            {'latitude':nc_lat, 'longitude':nc_lon}).where(
+                time_query, drop=True)#.resample(
+                    #{'time':sampling}).mean()
+         
+        #convert to pandas and save into dict
+        csv_reference = new_nc.to_dataframe()
+        reference_files[location] = csv_reference
+        print(f'{len(csv_buoys)-list(csv_buoys.keys()).index(location)} out of {len(csv_buoys)} files left')
+    return reference_files
