@@ -18,9 +18,9 @@ import scipy.stats
 import dask
 # %%
 md = os.path.dirname(os.path.dirname(os.getcwd())) + '\\input_data'
-
+output_dir = '..\\..\\output_data'
 # %%
-ERAfiles = glob.glob(md + '\\ERA5\\*.nc')
+ERAfiles = glob.glob(md + '\\ERA5\\ocean\\*.nc')
 era = xr.open_mfdataset(ERAfiles)
 # %%
 
@@ -97,7 +97,7 @@ csv_list = glob.glob(md+'\\buoys' + '\*.csv')
 buoy_data = arrange_files(csv_list, column_names)
 # %%
 def filter_buoys(buoy_dict, proximity, **kwargs):
-    #kwargs is a grid resolution either in km (km=(x,y))
+    #kwargs is a grid resolution of ref data either in km (km=(x,y))
     # or in degrees. E.g. for ERA5 is degrees=(0.5, 0.5) 
     #proximity is as fraction relative to a grid point
 
@@ -173,44 +173,58 @@ locations = list(csv_buoys.keys())
 locations
 # %%
 def calc_stats(obs,frcst):
-    bias = (frcst - obs).mean()
+    print(location, 'line 1')
+    bias = (frcst - obs).mean().compute()
+    print(location, 'line 2')
     rmse = np.sqrt(((frcst - obs)**2).mean())
+    print(location, 'line 3')
     si = np.sqrt(
         (((frcst-frcst.mean())-(obs-obs.mean()))**2).mean()
         )/obs.mean()
+    #print(location, 'line 4')
     cc = (
         ((frcst-frcst.mean())*(obs-obs.mean())).sum()/
         np.sqrt(
             (((frcst-frcst.mean())**2).sum()*((obs-obs.mean())**2).sum()))
-        )
+        ).compute()
+    #print(location, 'line 5')
     num_pairs = min(len(obs), len(frcst))
+    #print(location, 'line 6')
     lsf = (
         ((obs**2).sum()-(obs.sum())**2/num_pairs)/
         ((obs*frcst).sum() - (obs.sum()*frcst.sum())/
         num_pairs)
-    )
+    ).compute()
     return {'bias':bias, 'rmse':rmse, 'si':si, 'cc':cc, 'lsf':lsf}
 
 # %%
-def stats_table(obs_dict, ref_dict, var):
+def stats_table(obs_dict, ref_dict, var_obs,var_ref):
     #make a map for the var names which are different in era and buoys
     data_stats = pd.DataFrame(
         columns=['lat','lon', 'duration', 'records', 'bias', 'rmse', 'si', 'cc', 'lsf'],
         index=range(len(obs_dict)))
     locations = list(obs_dict.keys())
     for location in locations:
+        minutes=obs_dict[location].assign(
+            minutes=obs_dict[location].index.minute.values
+            ).minutes
+        if len(obs_dict[location][(minutes!=0) & (minutes!=30)])>0:
+            obs_dict[location].index = obs_dict[location].index.dt.round(freq='30min')
+    
         row = locations.index(location)
-        stats = calc_stats(obs_dict[location][var], ref_dict[location][var])
+        print(location)
+        stats = calc_stats(obs_dict[location].loc[:,var_obs], ref_dict[location].loc[:,var_ref])
+        print('line 211')
         data_stats.loc[row, 'lat'] = location[0]
         data_stats.loc[row, 'lon'] = location[1]
         data_stats.loc[row, 'duration'] = round_to(len(pd.date_range(
             start=min(obs_dict[location].index), end=max(
                 obs_dict[location].index), freq='D'))/365, 0.1)
-        frequency = (obs_dict[location].index[1]-obs_dict[location].index[0]).seconds
+        frequency = (obs_dict[location].head().index[1]-obs_dict[location].head().index[0]).seconds
         if frequency/3600==1.0:
-            data_stats.loc[row, 'records'] = round_to(len(obs_dict[location][var].dropna())/8760, 0.1)
+            data_stats.loc[row, 'records'] = round_to(len(obs_dict[location].loc[:,var_obs].dropna())/8760, 0.1)
         else:
-            data_stats.loc[row, 'records'] = round_to(len(obs_dict[location][var].dropna())/17520, 0.1)
+            data_stats.loc[row, 'records'] = round_to(len(obs_dict[location].loc[:,var_obs].dropna())/17520, 0.1)
     
         data_stats.loc[row, 'bias'] = stats['bias']
         data_stats.loc[row, 'rmse'] = stats['rmse']
@@ -503,16 +517,23 @@ test.sel(concat_dim=['TIME']).drop('concat_dim').squeeze('concat_dim')#=['DEPTH'
 # %%
 
 # %%
-vars = ['VRM02','VRZA','VRPK','VGHS','VHM0']
+vars = ['VRM02','VRZA','VRPK','VGHS','VHM0','VAVH']
 # %%
 
 # %%
 #works
-# read files, exclude undesired vars, add lon-lat to coordinates and
+# read files, check the duration of the datasets,
+# exclude undesired vars, add lon-lat to coordinates and
 # save their attributes. Save all resulting datasets to list  
 dsets = []
+short = []
 for file in cmsfiles:
     ds = xr.open_dataset(file)
+    time_coverage = pd.to_datetime(
+        ds.time_coverage_end) - pd.to_datetime(ds.time_coverage_start)
+    if time_coverage < pd.Timedelta('365 days'):
+        short.append(ds)
+        continue
     exclude_vars = []
     for var in list(ds.keys()):
         if var not in vars:
@@ -528,6 +549,11 @@ for file in cmsfiles:
     ds.LATITUDE.attrs = lat_attr
     ds.LONGITUDE.attrs = lon_attr
     dsets.append(ds)
+# %%
+for ds in dsets:
+    print(ds.platform_code,
+        str(ds.TIME.min().values),
+        str(ds.TIME.max().values))
 # %%
 #doesn't work since the depth dim has different values
 cms_full = xr.concat(dsets[:100], dim = ['TIME'])
@@ -548,28 +574,32 @@ cms_full = xr.concat(ds_0depth[:2], dim = ['TIME'], fill_value=None)#, data_vars
 #trying to convert all files to a massive dask dataframe to then use
 #as with the previous code
 from dask.distributed import Client, progress
-client = Client()
+client = Client(processes=True, threads_per_worker=1)
 client.dashboard_link
 # %%
 
 # %%
 #create a dict to use with the previously defined functions
-# check the duration of the 
 dds_dict = {}
-not_in_dict = []
+not_in_dict = {}
 for ds in dsets:
+    lat = ds.LATITUDE
+    lon = ds.LONGITUDE
     try:
         ds = ds.sel(DEPTH=0)
     except: 
-        print(f'location: {ds.platform_code}')
-        not_in_dict.append(ds.platform_code)
+        #print(f'location: {ds.platform_code}')
+        not_in_dict[(float(lat),float(lon))] = ds
         continue
-    lat = ds.LATITUDE
-    lon = ds.LONGITUDE
+    
     dd = ds.sel(LATITUDE=lat, LONGITUDE=lon).to_dask_dataframe()
     dds_dict[(float(lat),float(lon))] = dd
 #dsets[0].sel(LATITUDE='60.8833',LONGITUDE='20.7500', DEPTH=0)
 #line above returns a ds 
+# %%
+for location, data in dds_dict.items():
+    data = data.set_index('TIME')
+    dds_dict[location] = data
 # %%
 #works but it compares lat and lon separately, hence it returns way too many 
 # locations, potential to modify the func
@@ -577,13 +607,14 @@ cms_buoys = filter_buoys(dds_dict, 0.5, degrees=(0.5,0.5))
 # %%
 #returns an error since index is not "indexable" (dd.index works, 
 # dd.index[0] doesn't - use dd.loc instead)
-era_cms = create_era_series(era, cms_buoys)
+era_cms = create_era_dd(era, cms_buoys)
 # %%
 for location, data in cms_buoys.items():
     print(location)
     print(data.index[0])
 # %%
-def create_era_series(nc_reference, csv_buoys):
+# %%
+def create_era_dd(nc_reference, csv_buoys):
     #sampling should be in time format of python ('1d', '10y' etc)
     #nc_reference is a 3D netCDF file
     #csv_buoys 
@@ -591,26 +622,113 @@ def create_era_series(nc_reference, csv_buoys):
     # the function is to select data from ERA5 file that matches files with buoy data
     # in terms of locations and time period. The data is then converted to pd.DataFrame
     reference_files = {}
+    buoy_files = []
     for location, data in csv_buoys.items():
         #select netCDF part where the time and location 
         #corresponds to the observations
         nc_lat, nc_lon = round_to(location[0],0.5), round_to(location[1],0.5)
-        print(f'location: {location},line 154')
+        #print(f'location: {location},line 154')
         try:
-            nc_start, nc_end = data.index[0], data.index[-1]
-            print(f'location: {location},line 157')
+            nc_start, nc_end = data.index.min(), data.index.max()
+         #   print(f'location: {location},line 157')
             time_query = (nc_reference.time >= nc_start) & (nc_reference.time <= nc_end)
         except:
-            nc_start, nc_end = np.datetime64(data.index[0]), np.datetime64(data.index[1])
+            nc_start, nc_end = data.index.min().compute(), data.index.max().compute()
             time_query = (nc_reference.time >= nc_start) & (nc_reference.time <= nc_end)
-        print(f'location: {location},line 162')
-        new_nc = nc_reference.sel(
-            {'latitude':nc_lat, 'longitude':nc_lon}).where(
-                time_query, drop=True)#.resample(
-                    #{'time':sampling}).mean()
-         
+        #print(f'location: {location},line 162')
+        try:
+            new_nc = nc_reference.sel(
+                {'latitude':nc_lat, 'longitude':nc_lon}).where(
+                    time_query, drop=True)
+            buoy_files.append(location)
+        except:
+            continue
+        #print(f'location: {location},line 621')
         #convert to pandas and save into dict
         csv_reference = new_nc.to_dataframe()
         reference_files[location] = csv_reference
-        print(f'{len(csv_buoys)-list(csv_buoys.keys()).index(location)} out of {len(csv_buoys)} files left')
-    return reference_files
+        print(f'{len(csv_buoys)-list(csv_buoys.keys()).index(location)-1} out of {len(csv_buoys)} files left')
+    return reference_files, buoy_files
+# %%
+era_cms, locs = create_era_dd(era, cms_buoys)
+# %%
+import vaex
+# %%
+import json
+# %%
+dct = dsets[0].to_dict()
+vals = dct['dims']['TIME']
+data = {'time': pd.to_datetime(dct['coords']['TIME']['data']),
+        'lat': dct['coords']['LATITUDE']['data']*vals,
+        'lon': dct['coords']['LONGITUDE']['data']*vals,
+        'swh': [dct['data_vars']['VGHS']['data'][0][0][i][0] 
+                for i in range(vals)]}
+vdf = vaex.from_dict(data)
+# %%
+vaex_buoys = {}
+j=0
+for ds in dsets:
+    dct = ds.to_dict()
+    entries = dct['dims']['TIME']
+    new_ds = {'time':pd.to_datetime(dct['coords']['TIME']['data'])}
+    for var, data  in dct['data_vars'].items():
+        new_ds[var] = [dct['data_vars'][var]['data'][0][0][i][0] 
+                        for i in range(entries)]
+    vaex_df = vaex.from_dict(new_ds)
+    lat = float(dct['coords']['LATITUDE']['data'][0])
+    lon = float(dct['coords']['LONGITUDE']['data'][0])
+    vaex_buoys[(lat,lon)] = vaex_df
+    j+=1
+    print(f'{len(dsets)-j} files left')
+# %%
+no_vars = []
+for location, data in cms_buoys.items():
+    if list(data.columns)==['time']:
+        no_vars.append(location)
+for loc in no_vars:
+    cms_buoys.pop(loc)
+# %%
+
+# %%
+all_locs = list(cms_buoys.keys())
+for loc in all_locs:
+    if loc not in locs:
+        cms_buoys.pop(loc)
+# %%
+# the usual operations (e.g. in calc_stats) don't work 
+# with vaex data, but do with dask 
+
+# %%
+for loc, data in cms_buoys.items():
+    if loc in locs:
+        print(loc, data.columns)
+# %%
+from datetime import timedelta
+# %%
+
+# %%
+renamed = []
+dropped = []
+for loc, data in cms_buoys.items():
+    if list(data.columns)[2:]==['VAVH']:
+        data = data.rename(columns={'VAVH':'VHM0'})
+        cms_buoys[loc] = data
+        renamed.append(loc)
+    if list(data.columns)[2:]==['VAVH', 'VHM0']:
+        data = data.drop(columns=['VAVH'])
+        dropped.append(loc)
+    if list(data.columns)[2:]==['VGHS']:
+        data = data.rename(columns={'VGHS':'VHM0'})
+        cms_buoys[loc] = data
+        renamed.append(loc)
+# %%
+stats_table(cms_buoys,era_cms, 'VHM0', 'swh')
+#%%
+
+# %%
+#convert era to dask, otherwise calc_stats doesn't work
+era_dds = {}
+for loc,era_dataset in era_cms.items():
+    era_dds[loc] = dask.dataframe.from_pandas(
+        era_dataset,npartitions=24)
+# %%
