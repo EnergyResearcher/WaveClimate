@@ -173,11 +173,12 @@ locations = list(csv_buoys.keys())
 locations
 # %%
 def calc_stats(obs,frcst):
-    print(location, 'line 1')
-    bias = (frcst - obs).mean().compute()
-    print(location, 'line 2')
+    frcst, obs = dask.compute(frcst, obs)
+    #print(location, 'line 1')
+    bias = (frcst - obs).mean()
+    #print(location, 'line 2')
     rmse = np.sqrt(((frcst - obs)**2).mean())
-    print(location, 'line 3')
+    #print(location, 'line 3')
     si = np.sqrt(
         (((frcst-frcst.mean())-(obs-obs.mean()))**2).mean()
         )/obs.mean()
@@ -186,7 +187,7 @@ def calc_stats(obs,frcst):
         ((frcst-frcst.mean())*(obs-obs.mean())).sum()/
         np.sqrt(
             (((frcst-frcst.mean())**2).sum()*((obs-obs.mean())**2).sum()))
-        ).compute()
+        )
     #print(location, 'line 5')
     num_pairs = min(len(obs), len(frcst))
     #print(location, 'line 6')
@@ -194,7 +195,7 @@ def calc_stats(obs,frcst):
         ((obs**2).sum()-(obs.sum())**2/num_pairs)/
         ((obs*frcst).sum() - (obs.sum()*frcst.sum())/
         num_pairs)
-    ).compute()
+    )
     return {'bias':bias, 'rmse':rmse, 'si':si, 'cc':cc, 'lsf':lsf}
 
 # %%
@@ -212,7 +213,7 @@ def stats_table(obs_dict, ref_dict, var_obs,var_ref):
             obs_dict[location].index = obs_dict[location].index.dt.round(freq='30min')
     
         row = locations.index(location)
-        print(location)
+        #print(location)
         stats = calc_stats(obs_dict[location].loc[:,var_obs], ref_dict[location].loc[:,var_ref])
         print('line 211')
         data_stats.loc[row, 'lat'] = location[0]
@@ -266,35 +267,35 @@ def best_fit_distribution(data, bins=200, ax=None):
         print("{:>3} / {:<3}: {}".format( ii+1, len(selection),distribution))
 
         distribution = getattr(scipy.stats, distribution)
+        #fit dist to data
+        params = distribution.fit(data)
 
+                #Separate parts of parameters
+        arg = params[:-2]
+        loc = params[-2]
+        scale = params[-1]
+
+                #Calculate fitted PDF and error with fit in distribution
+        pdf = distribution.pdf(x, loc=loc, scale=scale, *arg)
+        sse = np.sum(np.power(y-pdf, 2.0))
+
+                #if axis pass in add to plot
+        try:
+            if ax:
+                pd.Series(pdf,x).plot(ax=ax)
+                end
+        except Exception:
+            pass
+
+                #identify if this distribution is better
+        best_distributions.append((distribution, params, sse))
         #Try to fit the distribution
         try:
             #Ignore warnings from data that can't be fit
             with warnings.catch_warnings():
                 warnings.filterwarnings('ignore')
 
-                #fit dist to data
-                params = distribution.fit(data)
-
-                #Separate parts of parameters
-                arg = params[:-2]
-                loc = params[-2]
-                scale = params[-1]
-
-                #Calculate fitted PDF and error with fit in distribution
-                pdf = distribution.pdf(x, loc=loc, scale=scale, *arg)
-                sse = np.sum(np.power(y-pdf, 2.0))
-
-                #if axis pass in add to plot
-                try:
-                    if ax:
-                        pd.Series(pdf,x).plot(ax=ax)
-                        end
-                except Exception:
-                    pass
-
-                #identify if this distribution is better
-                best_distributions.append((distribution, params, sse))
+                
         
         except Exception:
             pass
@@ -549,33 +550,9 @@ for file in cmsfiles:
     ds.LATITUDE.attrs = lat_attr
     ds.LONGITUDE.attrs = lon_attr
     dsets.append(ds)
-# %%
-for ds in dsets:
-    print(ds.platform_code,
-        str(ds.TIME.min().values),
-        str(ds.TIME.max().values))
-# %%
-#doesn't work since the depth dim has different values
-cms_full = xr.concat(dsets[:100], dim = ['TIME'])
-# %%
-ds_0depth = []
-for ds in dsets:
-    try:
-        ds = ds.sel(DEPTH=0)
-    except: continue
-    ds_0depth.append(ds.VHM0)
-# %%
-#memory error - new error now for some reason
-cms_full = xr.concat(ds_0depth[:2], dim = ['TIME'], fill_value=None)#, data_vars=['VHM0'])#,compat='override')
 
 # %%
 
-# %%
-#trying to convert all files to a massive dask dataframe to then use
-#as with the previous code
-from dask.distributed import Client, progress
-client = Client(processes=True, threads_per_worker=1)
-client.dashboard_link
 # %%
 
 # %%
@@ -605,13 +582,7 @@ for location, data in dds_dict.items():
 # locations, potential to modify the func
 cms_buoys = filter_buoys(dds_dict, 0.5, degrees=(0.5,0.5))
 # %%
-#returns an error since index is not "indexable" (dd.index works, 
-# dd.index[0] doesn't - use dd.loc instead)
-era_cms = create_era_dd(era, cms_buoys)
-# %%
-for location, data in cms_buoys.items():
-    print(location)
-    print(data.index[0])
+
 # %%
 # %%
 def create_era_dd(nc_reference, csv_buoys):
@@ -647,7 +618,7 @@ def create_era_dd(nc_reference, csv_buoys):
         #convert to pandas and save into dict
         csv_reference = new_nc.to_dataframe()
         reference_files[location] = csv_reference
-        print(f'{len(csv_buoys)-list(csv_buoys.keys()).index(location)-1} out of {len(csv_buoys)} files left')
+        #print(f'{len(csv_buoys)-list(csv_buoys.keys()).index(location)-1} out of {len(csv_buoys)} files left')
     return reference_files, buoy_files
 # %%
 era_cms, locs = create_era_dd(era, cms_buoys)
@@ -722,13 +693,150 @@ for loc, data in cms_buoys.items():
         cms_buoys[loc] = data
         renamed.append(loc)
 # %%
-stats_table(cms_buoys,era_cms, 'VHM0', 'swh')
-#%%
 
-# %%
+#%%
 #convert era to dask, otherwise calc_stats doesn't work
 era_dds = {}
 for loc,era_dataset in era_cms.items():
     era_dds[loc] = dask.dataframe.from_pandas(
         era_dataset,npartitions=24)
 # %%
+cms_stats = stats_table(cms_buoys,era_dds, 'VHM0', 'swh')
+# %%
+#code copied from above (to test before wrapping into a function)
+# %%
+# plotting 2 distributions with a histogram (working)
+for location in locations:
+    waves = pd.Series(csv_buoys[location].swh.dropna().values)
+    fig, ax = plt.subplots(figsize=(12,8))
+    waves.plot(axes=ax, kind='hist',bins=35, density=True, color='peachpuff')
+    distributions = best_fit_distribution(waves, 200, ax)
+    plt.legend(['lognorm','exponweib','buoy'])
+    plt.savefig(f'..\\..\\graphs\\era_vs_buoys\\{location}_dist.svg')
+    #dists_dic[location] = distributions
+# %%
+#compare two distributions on ERA5 and buoy data on a plot + histogram
+buoy_dists_dic = {}
+era_dists_dic = {}
+for location in locs[3:]:
+    waves = pd.Series(cms_buoys[location].VHM0.dropna().values.compute())
+    era_swh = pd.Series(era_dds[location].swh.dropna().values.compute())
+    plt.figure(figsize=(12,8))
+    ax = waves.plot(kind='hist',bins=25, density=True, color='peachpuff', label='buoy')
+    buoy_distr = best_fit_distribution(waves, 200)
+    era_distr = best_fit_distribution(era_swh, 200)
+    colors = ['limegreen','purple']
+    #plot buoy distributions
+    for bdistr in buoy_distr:
+        ax = plt.plot(
+            make_pdf(bdistr[0], bdistr[1]),
+            color=colors[buoy_distr.index(bdistr)], linestyle='-',
+            label='buoy:{}'.format(bdistr[0].name))
+
+    #plot ERA5 distributions
+    for edistr in era_distr:
+        ax = plt.plot(
+            make_pdf(edistr[0], edistr[1]),
+            color=colors[era_distr.index(edistr)], linestyle='--',
+            label='ERA:{}'.format(edistr[0].name))
+    plt.title(f'Significant wave height PDF at {location}')
+    plt.legend()
+    plt.savefig(f'..\\..\\graphs\\era_vs_buoys\\glob_data\\{location}_dist.svg')
+    buoy_dists_dic[location] = buoy_distr
+    era_dists_dic[location] = era_distr
+# %%
+import warnings
+
+def fxn():
+    warnings.warn("nans", RuntimeWarning)
+
+with warnings.catch_warnings():
+    warnings.simplefilter("ignore")
+    fxn()
+#%%
+#calc stats in bins and temporarily
+bins = list(np.arange(0, 10.5, 0.5))
+subdfs =[]
+long_locs = []
+for location in locs:
+    print(f'location {locs.index(location)} out of {len(locs)}')
+    frequency = (cms_buoys[location].head(2).index[1]-cms_buoys[location].head(2).index[0]).seconds/3600
+    cms_buoys[location] = cms_buoys[location].resample('1H').mean()
+    binned_stats = pd.DataFrame(
+        columns=['bias', 'rmse', 'si', 'cc', 'lsf', 'records'])
+    for bin in bins:
+        try:
+            subset_buoys = cms_buoys[location][
+                (cms_buoys[location].VHM0 >= bin) & (
+                    cms_buoys[location].VHM0 < bins[bins.index(bin)+1])]
+        except:
+            subset_buoys = cms_buoys[location][
+                (cms_buoys[location].VHM0 >= bin) & (cms_buoys[location].VHM0 < 10.5)]
+        #timesteps = subset_buoys.index.values.compute()
+        #if era_dds[location].index.min() > cms_buoys[location].index.min():
+
+        #try:
+        #    subset_era = era_dds[location].loc[timesteps]
+        #except:
+        #    subset_era = era_dds[location].loc[timesteps[1:]]
+        #print(f'location: {location}, bin: {bin}, buoy length: {len(subset_buoys)}, era length: {len(subset_era)}')
+        stat_dict = calc_stats(subset_buoys.VHM0, era_dds[location].swh)
+        statistic=pd.DataFrame(stat_dict, index=[bin])
+        if frequency==1.0:
+            statistic['records'] = round_to(len(subset_buoys)/24, 0.1)
+        else: statistic['records'] = round_to(len(subset_buoys)/48, 0.1)
+        binned_stats = pd.concat([binned_stats, statistic])
+    if binned_stats['records'].sum() < 365:
+        continue
+    subdfs.append(binned_stats)
+    long_locs.append(location)
+binned_results = pd.concat(subdfs, keys=long_locs)
+# %%
+binned_results.to_csv('binned_swh.csv')
+# %%
+binned_results.index.set_names(['latitude', 'longitude', 'bin'], inplace=True)
+
+# %%
+# this and 2 cells below to plot the calculated stats for comparing ERA5
+# and buoy data
+from matplotlib.pyplot import cm
+# %%
+fig, ax = plt.subplots(nrows=2, ncols=3, sharex=True, sharey=False, figsize=(30,20))
+#graphs = len(binned_results.columns)
+i = 0
+graphs = 0
+
+while i < ax.shape[0]:
+    j = 0
+    while j < ax.shape[1]:
+    #create plot for every metric and different lines for different locations
+    # probably need to swap the for loops around
+        locs = []
+        color = iter(cm.brg(np.linspace(0,1,len(binned_results.index.unique(level=1)))))
+        for location, data in binned_results.groupby(level=[0,1]):
+        #here location returns a tuple of lat and lon,
+        #data is the corresponding dataframe
+            #shade = next(color)
+            ax[i,j].plot(bins, data[binned_results.columns[graphs]], linestyle='--')#, c=shade)#, color=colours[graphs])
+            #condition = (cms_stats.lat==location[0]) & (cms_stats.lon==location[1])
+            #num = cms_stats.loc[condition, 'records']
+            #eq_years = float(num)
+            #locs.append(f'({location[0]:.4f}, {location[1]:.4f}); {eq_years} eq.years')
+        means = []
+        for bin, df in binned_results.groupby(level=[2]):
+            means.append(df[binned_results.columns[graphs]].mean())
+        ax[i,j].plot(bins, means, linestyle='-', lw=6, color='slategray')
+        ax[i,j].grid()
+        ax[i,j].legend(locs+ ['mean'])
+        ax[i,j].tick_params(axis='both', which='major', labelsize=25)
+        ax[i,j].set_ylabel(binned_results.columns[graphs], fontsize=30)
+        if i==1:
+            ax[i,j].set_xlabel('Significant wave height, m', fontsize=30)
+        j += 1
+        graphs += 1
+    i += 1
+    
+fig.tight_layout()
+
+# %%
+fig.savefig(f'..\\..\\graphs\\era_vs_buoys\\BinnedStats.svg')
