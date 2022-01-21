@@ -336,15 +336,6 @@ def make_pdf(dist, params, size=10000):
 
     return pdf
 # %%
-# plotting 2 distributions with a histogram (working)
-for location in locations:
-    waves = pd.Series(csv_buoys[location].swh.dropna().values)
-    fig, ax = plt.subplots(figsize=(12,8))
-    waves.plot(axes=ax, kind='hist',bins=35, density=True, color='peachpuff')
-    distributions = best_fit_distribution(waves, 200, ax)
-    plt.legend(['lognorm','exponweib','buoy'])
-    plt.savefig(f'..\\..\\graphs\\era_vs_buoys\\{location}_dist.svg')
-    #dists_dic[location] = distributions
 # %%
 #compare two distributions on ERA5 and buoy data on a plot + histogram
 buoy_dists_dic = {}
@@ -478,37 +469,53 @@ cmsfiles.remove(md + '\\cms\\PotDrifting=0\\GL_WS_MO_46t29.nc')
 # %%
 vars = ['VRM02','VRZA','VRPK','VGHS','VHM0','VAVH']
 # %%
+#file generator
+def open_select_buoys(files, wave_vars):
+    """
+    the generator which checks the measurement duration and
+    presence of required variables (wave_vars) and yields the datasets
+    which have more than 1 year of data and at least 1 variable
+    """
+    less_than_year = []
+    for file in files:
+        xrds = xr.open_dataset(file)
+        
+        #skip the file with less than 1 year of measurements
+        time_coverage = pd.to_datetime(
+            xrds.time_coverage_end) - pd.to_datetime(xrds.time_coverage_start)
+        if time_coverage < pd.Timedelta('365 days'):
+            less_than_year.append(file.split('\\')[-1])
+            continue
+        
+        # remove unwanted variables
+        exclude_vars = []
+        for var in list(xrds.keys()):
+            if var not in wave_vars:
+                exclude_vars.append(var)    
+        xrds = xrds.drop_vars(exclude_vars)
 
+        # skip the file if there're no variables left
+        if not list(xrds.keys()):
+            continue
+
+        yield xrds
+# %%
+def organise_coords(dataset):
+    """add lon-lat to coordinates and save their attributes"""
+    lat_attr = dataset.LATITUDE.attrs
+    lon_attr = dataset.LONGITUDE.attrs
+    dataset.coords['LATITUDE'] = dataset.geospatial_lat_min
+    dataset.coords['LONGITUDE'] = dataset.geospatial_lon_min
+    dataset = dataset.expand_dims(['LATITUDE', 'LONGITUDE'])
+    dataset.LATITUDE.attrs = lat_attr
+    dataset.LONGITUDE.attrs = lon_attr
+    return dataset
 # %%
 #works
-# read files, check the duration of the datasets,
-# exclude undesired vars, add lon-lat to coordinates and
-# save their attributes. Save all resulting datasets to list  
 dsets = []
-short = []
-for file in cmsfiles:
-    ds = xr.open_dataset(file)
-    time_coverage = pd.to_datetime(
-        ds.time_coverage_end) - pd.to_datetime(ds.time_coverage_start)
-    if time_coverage < pd.Timedelta('365 days'):
-        short.append(ds)
-        continue
-    exclude_vars = []
-    for var in list(ds.keys()):
-        if var not in vars:
-            exclude_vars.append(var)    
-    ds = ds.drop_vars(exclude_vars)
-    
-    #print(f'location: {ds.platform_code}; {list(ds.keys())}')
-    lat_attr = ds.LATITUDE.attrs
-    lon_attr = ds.LONGITUDE.attrs
-    ds.coords['LATITUDE'] = ds.geospatial_lat_min
-    ds.coords['LONGITUDE'] = ds.geospatial_lon_min
-    ds = ds.expand_dims(['LATITUDE', 'LONGITUDE'])
-    ds.LATITUDE.attrs = lat_attr
-    ds.LONGITUDE.attrs = lon_attr
+for ds in tqdm(open_select_buoys(cmsfiles, vars), total=len(cmsfiles)):
+    ds = organise_coords(ds)
     dsets.append(ds)
-
 # %%
 
 # %%
@@ -581,13 +588,7 @@ def create_era_dd(nc_reference, csv_buoys):
 # %%
 era_cms, locs = create_era_dd(era, cms_buoys)
 
-# %%
-no_vars = []
-for location, data in cms_buoys.items():
-    if list(data.columns)==['time']:
-        no_vars.append(location)
-for loc in no_vars:
-    cms_buoys.pop(loc)
+
 # %%
 
 # %%
@@ -630,16 +631,7 @@ for loc,era_dataset in era_cms.items():
 cms_stats = stats_table(cms_buoys,era_dds, 'VHM0', 'swh')
 # %%
 #code copied from above (to test before wrapping into a function)
-# %%
-# plotting 2 distributions with a histogram (working)
-for location in locations:
-    waves = pd.Series(csv_buoys[location].swh.dropna().values)
-    fig, ax = plt.subplots(figsize=(12,8))
-    waves.plot(axes=ax, kind='hist',bins=35, density=True, color='peachpuff')
-    distributions = best_fit_distribution(waves, 200, ax)
-    plt.legend(['lognorm','exponweib','buoy'])
-    plt.savefig(f'..\\..\\graphs\\era_vs_buoys\\{location}_dist.svg')
-    #dists_dic[location] = distributions
+
 # %%
 #compare two distributions on ERA5 and buoy data on a plot + histogram
 buoy_dists_dic = {}
