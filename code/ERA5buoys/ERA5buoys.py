@@ -16,6 +16,9 @@ import scipy.stats
 #from analysis import get_info_from_filename
 #from analysis import arrange_files
 import dask
+import warnings
+from datetime import timedelta
+from matplotlib.pyplot import cm
 # %%
 md = os.path.dirname(os.path.dirname(os.getcwd())) + '\\input_data'
 output_dir = '..\\..\\output_data'
@@ -258,10 +261,7 @@ stats = stats_table(csv_buoys, era_dict, 'swh')
 #%%
 # code from stack overflow:
 # https://stackoverflow.com/questions/6620471/fitting-empirical-distribution-to-theoretical-ones-with-scipy-python
-from scipy.stats._continuous_distns import _distn_names
-import warnings
-#dstr_names = ['levy', 'wrapcauchy', 'weibull_min', 'rayleigh', 'lognorm','expon', 'pareto','gamma', 'genextreme', 'beta', 't']
-# %%
+
 #Create models from data
 def best_fit_distribution(data, bins=200, ax=None):
     """Model data by finding best fit distribution to data"""
@@ -432,7 +432,7 @@ binned_results.index.set_names(['latitude', 'longitude', 'bin'], inplace=True)
 # %%
 # this and 2 cells below to plot the calculated stats for comparing ERA5
 # and buoy data
-from matplotlib.pyplot import cm
+
 # %%
 fig, ax = plt.subplots(nrows=2, ncols=3, sharex=True, sharey=False, figsize=(30,20))
 #graphs = len(binned_results.columns)
@@ -475,59 +475,6 @@ cmsfiles = glob.glob(md + '\\cms\\PotDrifting=0\\*.nc')
 cmsfiles.remove(md + '\\cms\\PotDrifting=0\\GL_WS_MO_44t14.nc')
 cmsfiles.remove(md + '\\cms\\PotDrifting=0\\GL_WS_MO_45t01.nc')
 cmsfiles.remove(md + '\\cms\\PotDrifting=0\\GL_WS_MO_46t29.nc')
-# %%
-
-# %%
-from decimal import *
-# %%
-#works but crashes
-buoy_dfs = {}
-for ds in cms[:433]:
-    lat = Decimal(ds.geospatial_lat_min)
-    lon = Decimal(ds.geospatial_lon_min)
-    print(ds.platform_code, f'({lat}, {lon})')
-    try:
-        df = ds.sel(
-            POSITION=0, LATITUDE=lat, LONGITUDE=lon, DEPTH=0).drop_dims(
-                ['LATITUDE', 'LONGITUDE']).to_dataframe()
-    except:
-        try:
-        #print(ds.platform_code, f'({lat}, {lon})')
-            df = ds.sel(
-                POSITION=0, LATITUDE=lat, LONGITUDE=lon, DEPTH=0).to_dataframe()
-        except: continue
-    buoy_dfs[(lat, lon)] = df
-    
-# %%
-
-# %%
-#testing code? should work
-
-ds1=xr.open_dataset(cmsfiles[0])
-ds2=xr.open_dataset(cmsfiles[1])
-exclude_vars = []
-for var in list(ds1.keys()):
-    if var not in vars:
-        exclude_vars.append(var)    
-ds1 = ds1.drop_vars(exclude_vars)
-exclude_vars = []
-for var in list(ds2.keys()):
-    if var not in vars:
-        exclude_vars.append(var)    
-ds2 = ds2.drop_vars(exclude_vars)
-xr.concat(
-    [ds1.drop_dims(['LATITUDE', 'LONGITUDE']),
-    ds2.drop_dims(['LATITUDE', 'LONGITUDE'])], dim=['TIME', 'DEPTH']).sel(concat_dim='TIME')
-ds1.coords["LATITUDE"] = ds1.geospatial_lat_min
-ds2.coords["LATITUDE"] = ds2.geospatial_lat_min
-ds1.coords["LONGITUDE"] = ds1.geospatial_lon_min
-ds2.coords["LONGITUDE"] = ds2.geospatial_lon_min
-ds1 = ds1.expand_dims(['LATITUDE', 'LONGITUDE'])
-ds2 = ds2.expand_dims(['LATITUDE', 'LONGITUDE'])
-test = xr.concat([ds1, ds2], dim = ['TIME', 'DEPTH'])
-test.sel(concat_dim=['TIME']).drop('concat_dim').squeeze('concat_dim')#=['DEPTH'])#.VHM0.mean(('LATITUDE', 'LONGITUDE'))
-# %%
-
 # %%
 vars = ['VRM02','VRZA','VRPK','VGHS','VHM0','VAVH']
 # %%
@@ -633,35 +580,7 @@ def create_era_dd(nc_reference, csv_buoys):
     return reference_files, buoy_files
 # %%
 era_cms, locs = create_era_dd(era, cms_buoys)
-# %%
-import vaex
-# %%
-import json
-# %%
-dct = dsets[0].to_dict()
-vals = dct['dims']['TIME']
-data = {'time': pd.to_datetime(dct['coords']['TIME']['data']),
-        'lat': dct['coords']['LATITUDE']['data']*vals,
-        'lon': dct['coords']['LONGITUDE']['data']*vals,
-        'swh': [dct['data_vars']['VGHS']['data'][0][0][i][0] 
-                for i in range(vals)]}
-vdf = vaex.from_dict(data)
-# %%
-vaex_buoys = {}
-j=0
-for ds in dsets:
-    dct = ds.to_dict()
-    entries = dct['dims']['TIME']
-    new_ds = {'time':pd.to_datetime(dct['coords']['TIME']['data'])}
-    for var, data  in dct['data_vars'].items():
-        new_ds[var] = [dct['data_vars'][var]['data'][0][0][i][0] 
-                        for i in range(entries)]
-    vaex_df = vaex.from_dict(new_ds)
-    lat = float(dct['coords']['LATITUDE']['data'][0])
-    lon = float(dct['coords']['LONGITUDE']['data'][0])
-    vaex_buoys[(lat,lon)] = vaex_df
-    j+=1
-    print(f'{len(dsets)-j} files left')
+
 # %%
 no_vars = []
 for location, data in cms_buoys.items():
@@ -684,10 +603,6 @@ for loc in all_locs:
 for loc, data in cms_buoys.items():
     if loc in locs:
         print(loc, data.columns)
-# %%
-from datetime import timedelta
-# %%
-
 # %%
 renamed = []
 dropped = []
@@ -756,14 +671,8 @@ for location in locs[3:]:
     buoy_dists_dic[location] = buoy_distr
     era_dists_dic[location] = era_distr
 # %%
-import warnings
 
-def fxn():
-    warnings.warn("nans", RuntimeWarning)
 
-with warnings.catch_warnings():
-    warnings.simplefilter("ignore")
-    fxn()
 #%%
 #calc stats in bins and temporarily
 bins = list(np.arange(0, 10.5, 0.5))
@@ -783,6 +692,9 @@ for location in locs:
         except:
             subset_buoys = cms_buoys[location][
                 (cms_buoys[location].VHM0 >= bin) & (cms_buoys[location].VHM0 < 10.5)]
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+        
         #timesteps = subset_buoys.index.values.compute()
         #if era_dds[location].index.min() > cms_buoys[location].index.min():
 
@@ -810,7 +722,6 @@ binned_results.index.set_names(['latitude', 'longitude', 'bin'], inplace=True)
 # %%
 # this and 2 cells below to plot the calculated stats for comparing ERA5
 # and buoy data
-from matplotlib.pyplot import cm
 # %%
 fig, ax = plt.subplots(nrows=2, ncols=3, sharex=True, sharey=False, figsize=(30,20))
 #graphs = len(binned_results.columns)
