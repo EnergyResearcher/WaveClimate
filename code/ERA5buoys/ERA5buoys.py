@@ -202,36 +202,47 @@ def calc_stats(obs,frcst):
 def stats_table(obs_dict, ref_dict, var_obs,var_ref):
     #make a map for the var names which are different in era and buoys
     data_stats = pd.DataFrame(
-        columns=['lat','lon', 'duration', 'records', 'bias', 'rmse', 'si', 'cc', 'lsf'],
-        index=range(len(obs_dict)))
+        columns=['lat','lon', 'duration', 'records', 'bias', 
+                'rmse', 'si', 'cc', 'lsf', 'min', 'max', 'meadian',
+                'mean', 'missing'])
     locations = list(obs_dict.keys())
     for location in locations:
+        
+        #fix the observations which are not at round timesteps
         minutes=obs_dict[location].assign(
             minutes=obs_dict[location].index.minute.values
             ).minutes
         if len(obs_dict[location][(minutes!=0) & (minutes!=30)])>0:
             obs_dict[location].index = obs_dict[location].index.dt.round(freq='30min')
-    
-        row = locations.index(location)
-        #print(location)
-        stats = calc_stats(obs_dict[location].loc[:,var_obs], ref_dict[location].loc[:,var_ref])
-        print('line 211')
-        data_stats.loc[row, 'lat'] = location[0]
-        data_stats.loc[row, 'lon'] = location[1]
-        data_stats.loc[row, 'duration'] = round_to(len(pd.date_range(
+
+        #time-related stats
+        full_series = pd.date_range(
             start=min(obs_dict[location].index), end=max(
-                obs_dict[location].index), freq='D'))/365, 0.1)
+                obs_dict[location].index), freq='H')
+        duration = round_to(len(full_series)/8760, 0.1)
         frequency = (obs_dict[location].head().index[1]-obs_dict[location].head().index[0]).seconds
-        if frequency/3600==1.0:
-            data_stats.loc[row, 'records'] = round_to(len(obs_dict[location].loc[:,var_obs].dropna())/8760, 0.1)
-        else:
-            data_stats.loc[row, 'records'] = round_to(len(obs_dict[location].loc[:,var_obs].dropna())/17520, 0.1)
-    
-        data_stats.loc[row, 'bias'] = stats['bias']
-        data_stats.loc[row, 'rmse'] = stats['rmse']
-        data_stats.loc[row, 'si'] = stats['si']
-        data_stats.loc[row, 'cc'] = stats['cc']
-        data_stats.loc[row, 'lsf'] = stats['lsf']
+        if frequency/3600==1.0: #hourly frequency
+            records = round_to(len(variable.dropna())/8760, 0.1)
+        else: #half-hourly frequency
+            records = round_to(len(variable.dropna())/17520, 0.1)
+        missing = len(variable.dropna())/len(full_series)
+
+        # calculate the main and additional stats
+        variable = obs_dict[location].loc[:,var_obs]
+        stats = calc_stats(variable, ref_dict[location].loc[:,var_ref])        
+        
+        min, max, median, mean = dask.compute(
+            variable.min(), variable.max(), variable.median(), variable.mean())
+        
+        # add all stats as a table row
+        row_data = [location[0], location[1], duration, records,
+                    stats['bias'], stats['rmse'], stats['si'], stats['cc'],
+                    stats['lsf'], min, max, median, mean, missing]
+        
+        data_stats = data_stats.append(
+            pd.Series(row_data, index=data_stats.columns),
+            ignore_index=True)
+
     return data_stats
 # %%
 #one file from the UK wavenet data has a nan column, this code is to remove it
@@ -839,4 +850,5 @@ while i < ax.shape[0]:
 fig.tight_layout()
 
 # %%
-fig.savefig(f'..\\..\\graphs\\era_vs_buoys\\BinnedStats.svg')
+fig.savefig(f'..\\..\\graphs\\era_vs_buoys\\BinnedStatsCMS.svg')
+# %%
